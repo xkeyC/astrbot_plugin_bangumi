@@ -13,7 +13,7 @@
 > [!NOTE]  
 > 本项目在[astrbot_plugin_bangumi](https://github.com/Amatsutsumi/astrbot_plugin_bangumi) 的基础上进行二次开发
 
-## 
+## 角色精准搜索
 `/bgm角色搜索 关键词`
 
 ### 角色模糊搜索
