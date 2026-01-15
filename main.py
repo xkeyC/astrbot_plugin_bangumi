@@ -1,9 +1,6 @@
-import json
 import asyncio
-from typing import Optional
 import tempfile
 import os
-from pathlib import Path
 
 import astrbot.api.message_components as Comp
 from astrbot.api.event import filter, AstrMessageEvent
@@ -15,7 +12,7 @@ from astrbot.api import logger
 from .src.config.config_manager import ConfigManager
 
 # 导入我们重构后的统一API类
-from .src.core import BangumiService
+from .src.services import BangumiService
 from .src.render.subject_renderer import SubjectRenderer
 
 
@@ -32,9 +29,6 @@ class BangumiPlugin(Star):
         self.config = config
         self.config_manager = ConfigManager(config)
 
-        # 配置项读取
-        self.use_forward_msg = self.config.get("use_forward", "关闭") == "开启"
-        self.use_filesystem = self.config.get("if_fromfilesystem", "关闭") == "开启"
         self.max_fuzzy_results = 10  # 假设的默认值
         self.service = None
         try:
@@ -98,7 +92,7 @@ class BangumiPlugin(Star):
 
         try:
             # 渲染图片
-            await renderer.render_subject_card(subject_data, output_path=tmp_path)
+            await renderer.render_subject_card(subject_data, output_path=tmp_path, max_retries=self.config_manager.get_max_retries())
             
             # 4. 发送图片
             if os.path.exists(tmp_path) and os.path.getsize(tmp_path) > 0:
@@ -112,7 +106,5 @@ class BangumiPlugin(Star):
             logger.error(f"渲染或发送失败: {e}")
             yield event.plain_result(f"❌ 处理失败: {e}")
         finally:
-            # 清理临时文件 (可选，视 astrbot 处理机制而定，这里建议稍后清理或依赖系统清理)
-            # 为了保险起见，这里不立即删除，因为 yield 出去的消息可能还没发送完成
-            # 如果确认 astrbot 读取了文件内容，可以使用 os.remove(tmp_path)
-            pass
+            await asyncio.sleep(0.1)
+            os.remove(tmp_path)

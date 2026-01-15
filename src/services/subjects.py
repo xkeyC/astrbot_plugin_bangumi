@@ -1,7 +1,6 @@
 from typing import Dict, Any
 from .base import BaseBangumiService
 
-
 class SubjectsService(BaseBangumiService):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)

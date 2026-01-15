@@ -59,100 +59,110 @@ class SubjectRenderer(Renderer):
         headless: bool = True,
         output_path: Optional[str] = None,
         wait_time: int = 0,
+        max_retries: int = 3,
     ) -> Optional[bytes]:
         """
         将条目卡片渲染为图片。
         """
-        playwright = None
-        browser = None
-        context = None
-        page = None
+        # 预处理数据
+        render_data = self._preprocess_data(data)
 
-        try:
-            # 预处理数据
-            render_data = self._preprocess_data(data)
-            
-            # 启动 Playwright
-            playwright = await async_playwright().start()
-
-            # 浏览器启动参数，适配 Docker 环境
-            chrome_args = [
-                "--no-sandbox",
-                "--disable-setuid-sandbox",
-                "--disable-dev-shm-usage",
-                "--disable-gpu",
-                "--no-first-run",
-                "--disable-extensions",
-                "--disable-default-apps",
-            ]
-
-            browser = await playwright.chromium.launch(
-                headless=headless,
-                args=chrome_args,
-            )
-
-            # 创建页面上下文，设置高分屏参数
-            context = await browser.new_context(
-                viewport={"width": 1024, "height": 768},
-                device_scale_factor=3,
-                is_mobile=False,
-                has_touch=False
-            )
-            
-            page = await context.new_page()
-
-            # 渲染 HTML
-            template = self.template_env.get_template("subject/subject.html")
-            html_content = template.render(**render_data)
-
-            # 加载到页面
-            # wait_until="networkidle" 表示网络空闲（默认是 500ms 内没有新的网络请求）
+        async def _render_task():
+            playwright = None
+            browser = None
+            context = None
+            page = None
             try:
-                await page.set_content(
-                    html_content, 
-                    wait_until="networkidle", 
-                    timeout=15000 
+                # 启动 Playwright
+                playwright = await async_playwright().start()
+
+                # 浏览器启动参数，适配 Docker 环境
+                chrome_args = [
+                    "--no-sandbox",
+                    "--disable-setuid-sandbox",
+                    "--disable-dev-shm-usage",
+                    "--disable-gpu",
+                    "--no-first-run",
+                    "--disable-extensions",
+                    "--disable-default-apps",
+                ]
+
+                browser = await playwright.chromium.launch(
+                    headless=headless,
+                    args=chrome_args,
                 )
-            except Exception as e:
-                logger.warning(f"等待页面加载时发生超时或错误，尝试继续截图: {e}")
 
-            # 额外等待（如果指定）
-            if wait_time > 0:
-                logger.info(f"等待 {wait_time} 秒后关闭浏览器...")
-                await asyncio.sleep(wait_time)
+                # 创建页面上下文，设置高分屏参数
+                context = await browser.new_context(
+                    viewport={"width": 1024, "height": 768},
+                    device_scale_factor=3,
+                    is_mobile=False,
+                    has_touch=False
+                )
+                
+                page = await context.new_page()
 
-            # 定位卡片元素
-            card_locator = page.locator("#card")
-            
-            # 截图参数
-            screenshot_args = {"type": "png", "omit_background": True}
-            if output_path:
-                screenshot_args["path"] = output_path
+                # 渲染 HTML
+                template = self.template_env.get_template("subject/subject.html")
+                html_content = template.render(**render_data)
 
-            image_bytes = None
-            # 检查元素是否存在并截图
-            if await card_locator.count() > 0:
-                image_bytes = await card_locator.screenshot(**screenshot_args)
-            else:
-                logger.warning("未找到 #card 元素，进行全页截图")
-                screenshot_args["full_page"] = True
-                if "omit_background" in screenshot_args:
-                    del screenshot_args["omit_background"]
-                image_bytes = await page.screenshot(**screenshot_args)
+                # 获取模板文件的父目录作为 base_url，以便正确解析相对路径（如 CSS/JS）
+                template_file_path = Path(self.template_env.loader.searchpath[0]) / "subject"
+                base_url = template_file_path.as_uri() + "/"
 
-            return image_bytes
+                # 注入 <base> 标签以解决相对路径问题
+                if "<head>" in html_content:
+                    html_content = html_content.replace("<head>", f'<head><base href="{base_url}">', 1)
 
+                try:
+                    await page.set_content(
+                        html_content, 
+                        wait_until="networkidle", 
+                        timeout=15000 
+                    )
+                except Exception as e:
+                    logger.warning(f"等待页面加载时发生超时或错误，尝试继续截图: {e}")
+
+                # 额外等待（如果指定）
+                if wait_time > 0:
+                    logger.info(f"等待 {wait_time} 秒后关闭浏览器...")
+                    await asyncio.sleep(wait_time)
+
+                # 定位卡片元素
+                card_locator = page.locator("#card")
+                
+                # 截图参数
+                screenshot_args = {"type": "png", "omit_background": True}
+                if output_path:
+                    screenshot_args["path"] = output_path
+
+                image_bytes = None
+                # 检查元素是否存在并截图
+                if await card_locator.count() > 0:
+                    image_bytes = await card_locator.screenshot(**screenshot_args)
+                else:
+                    logger.warning("未找到 #card 元素，进行全页截图")
+                    screenshot_args["full_page"] = True
+                    if "omit_background" in screenshot_args:
+                        del screenshot_args["omit_background"]
+                    image_bytes = await page.screenshot(**screenshot_args)
+
+                return image_bytes
+
+            finally:
+                # 确保资源释放
+                if page:
+                    await page.close()
+                if context:
+                    await context.close()
+                if browser:
+                    await browser.close()
+                if playwright:
+                    await playwright.stop()
+
+        # 使用基类的重试机制执行渲染任务
+        try:
+            return await self.retry(_render_task, retries=max_retries, delay=1.0)
         except Exception as e:
-            logger.error(f"渲染错误: {e}")
+            logger.error(f"渲染最终失败: {e}")
             return None
-            
-        finally:
-            # 确保资源释放
-            if page:
-                await page.close()
-            if context:
-                await context.close()
-            if browser:
-                await browser.close()
-            if playwright:
-                await playwright.stop()

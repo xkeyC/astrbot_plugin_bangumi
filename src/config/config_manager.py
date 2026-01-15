@@ -1,5 +1,4 @@
 from astrbot.api import AstrBotConfig, logger
-from astrbot.core.utils.astrbot_path import get_astrbot_plugin_path
 import yaml
 from pathlib import Path
 class ConfigManager:
@@ -28,6 +27,9 @@ class ConfigManager:
     
     def get_port(self) -> str:
         return self.config.get("port", "7890")
+    
+    def get_max_retries(self) -> int:
+        return self.config.get("max_retries", 3)
 
     def save_config(self):
         """
