@@ -1,10 +1,11 @@
 import asyncio
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 import jinja2
 from playwright.async_api import async_playwright
 from astrbot.api import logger
 from .renderer import Renderer
+
 
 class SubjectRenderer(Renderer):
     def __init__(self):
@@ -53,6 +54,126 @@ class SubjectRenderer(Renderer):
 
         return processed
 
+    async def render_batch_subject_cards(
+        self,
+        data_list: List[Dict[str, Any]],
+        output_paths: List[str],
+        headless: bool = True,
+        wait_time: int = 0,
+        max_retries: int = 3,
+    ) -> List[bool]:
+        """
+        批量渲染条目卡片。
+        返回成功与否的布尔值列表，对应输入的 data_list。
+        """
+        results = [False] * len(data_list)
+        playwright = None
+        browser = None
+        context = None
+
+        try:
+            # 启动 Playwright
+            playwright = await async_playwright().start()
+
+            # 浏览器启动参数，适配 Docker 环境
+            chrome_args = [
+                "--no-sandbox",
+                "--disable-setuid-sandbox",
+                "--disable-dev-shm-usage",
+                "--disable-gpu",
+                "--no-first-run",
+                "--disable-extensions",
+                "--disable-default-apps",
+            ]
+
+            browser = await playwright.chromium.launch(
+                headless=headless,
+                args=chrome_args,
+            )
+
+            # 创建上下文
+            context = await browser.new_context(
+                viewport={"width": 1024, "height": 768},
+                device_scale_factor=3,
+                is_mobile=False,
+                has_touch=False,
+            )
+
+            # 准备模板和 Base URL
+            template = self.template_env.get_template("subject/subject.html")
+            template_file_path = (
+                Path(self.template_env.loader.searchpath[0]) / "subject"
+            )
+            base_url = template_file_path.as_uri() + "/"
+
+            for i, (data, output_path) in enumerate(zip(data_list, output_paths)):
+                page = None
+                try:
+                    # 预处理数据
+                    render_data = self._preprocess_data(data)
+                    html_content = template.render(**render_data)
+
+                    if "<head>" in html_content:
+                        html_content = html_content.replace(
+                            "<head>", f'<head><base href="{base_url}">', 1
+                        )
+
+                    # 重试逻辑
+                    for attempt in range(max_retries):
+                        try:
+                            page = await context.new_page()
+                            await page.set_content(
+                                html_content, wait_until="networkidle", timeout=15000
+                            )
+
+                            if wait_time > 0:
+                                await asyncio.sleep(wait_time)
+
+                            card_locator = page.locator("#card")
+                            screenshot_args = {
+                                "type": "png",
+                                "omit_background": True,
+                                "path": output_path,
+                            }
+
+                            if await card_locator.count() > 0:
+                                await card_locator.screenshot(**screenshot_args)
+                            else:
+                                logger.warning(
+                                    f"Batch render index {i}: #card element not found, using full page."
+                                )
+                                screenshot_args["full_page"] = True
+                                if "omit_background" in screenshot_args:
+                                    del screenshot_args["omit_background"]
+                                await page.screenshot(**screenshot_args)
+
+                            results[i] = True
+                            break  # Success, exit retry loop
+                        except Exception as e:
+                            logger.warning(
+                                f"渲染第 {i} 个条目失败 (尝试 {attempt + 1}/{max_retries}): {e}"
+                            )
+                            if attempt == max_retries - 1:
+                                logger.error(f"渲染第 {i} 个条目最终失败")
+                        finally:
+                            if page:
+                                await page.close()
+                                page = None
+                except Exception as e:
+                    logger.error(f"处理第 {i} 个条目数据时发生意外错误: {e}")
+
+        except Exception as e:
+            logger.error(f"批量渲染浏览器初始化或执行失败: {e}")
+        finally:
+            if context:
+                await context.close()
+            if browser:
+                await browser.close()
+            if playwright:
+                await playwright.stop()
+
+        return results
+
     async def render_subject_card(
         self,
         data: Dict[str, Any],
@@ -97,9 +218,9 @@ class SubjectRenderer(Renderer):
                     viewport={"width": 1024, "height": 768},
                     device_scale_factor=3,
                     is_mobile=False,
-                    has_touch=False
+                    has_touch=False,
                 )
-                
+
                 page = await context.new_page()
 
                 # 渲染 HTML
@@ -107,18 +228,20 @@ class SubjectRenderer(Renderer):
                 html_content = template.render(**render_data)
 
                 # 获取模板文件的父目录作为 base_url，以便正确解析相对路径（如 CSS/JS）
-                template_file_path = Path(self.template_env.loader.searchpath[0]) / "subject"
+                template_file_path = (
+                    Path(self.template_env.loader.searchpath[0]) / "subject"
+                )
                 base_url = template_file_path.as_uri() + "/"
 
                 # 注入 <base> 标签以解决相对路径问题
                 if "<head>" in html_content:
-                    html_content = html_content.replace("<head>", f'<head><base href="{base_url}">', 1)
+                    html_content = html_content.replace(
+                        "<head>", f'<head><base href="{base_url}">', 1
+                    )
 
                 try:
                     await page.set_content(
-                        html_content, 
-                        wait_until="networkidle", 
-                        timeout=15000 
+                        html_content, wait_until="networkidle", timeout=15000
                     )
                 except Exception as e:
                     logger.warning(f"等待页面加载时发生超时或错误，尝试继续截图: {e}")
@@ -130,7 +253,7 @@ class SubjectRenderer(Renderer):
 
                 # 定位卡片元素
                 card_locator = page.locator("#card")
-                
+
                 # 截图参数
                 screenshot_args = {"type": "png", "omit_background": True}
                 if output_path:

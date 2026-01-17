@@ -2,3 +2,5 @@ __pycache__/
 .DS_STORE
 settings.json
 data/
+*.xml
+*.iml
