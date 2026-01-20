@@ -1,9 +1,11 @@
 import asyncio
 from pathlib import Path
-from typing import Dict, Any, Optional, List
+from typing import Any, Dict, List, Optional
+
 import jinja2
-from playwright.async_api import async_playwright
 from astrbot.api import logger
+from playwright.async_api import async_playwright
+
 from .renderer import Renderer
 
 
@@ -189,40 +191,8 @@ class SubjectRenderer(Renderer):
         render_data = self._preprocess_data(data)
 
         async def _render_task():
-            playwright = None
-            browser = None
-            context = None
-            page = None
+            page = await self.create_page()
             try:
-                # 启动 Playwright
-                playwright = await async_playwright().start()
-
-                # 浏览器启动参数，适配 Docker 环境
-                chrome_args = [
-                    "--no-sandbox",
-                    "--disable-setuid-sandbox",
-                    "--disable-dev-shm-usage",
-                    "--disable-gpu",
-                    "--no-first-run",
-                    "--disable-extensions",
-                    "--disable-default-apps",
-                ]
-
-                browser = await playwright.chromium.launch(
-                    headless=headless,
-                    args=chrome_args,
-                )
-
-                # 创建页面上下文，设置高分屏参数
-                context = await browser.new_context(
-                    viewport={"width": 1024, "height": 768},
-                    device_scale_factor=3,
-                    is_mobile=False,
-                    has_touch=False,
-                )
-
-                page = await context.new_page()
-
                 # 渲染 HTML
                 template = self.template_env.get_template("subject/subject.html")
                 html_content = template.render(**render_data)
@@ -274,14 +244,8 @@ class SubjectRenderer(Renderer):
 
             finally:
                 # 确保资源释放
-                if page:
+                if page is not None:
                     await page.close()
-                if context:
-                    await context.close()
-                if browser:
-                    await browser.close()
-                if playwright:
-                    await playwright.stop()
 
         # 使用基类的重试机制执行渲染任务
         try:

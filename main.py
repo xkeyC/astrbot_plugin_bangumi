@@ -13,7 +13,12 @@ from .src.config.config_manager import ConfigManager
 
 # 导入我们重构后的统一API类
 from .src.services import BangumiService
+from .src.services.storage import StorageManager
 from .src.render.subject_renderer import SubjectRenderer
+from .src.render.calendar_renderer import CalendarRenderer
+from .src.render.render_result import RenderResult
+
+from typing import Any
 
 
 @register(
@@ -46,9 +51,42 @@ class BangumiPlugin(Star):
                 user_agent=self.config_manager.get_user_agent(),
                 proxy=proxy_url,
             )
-            logger.info("Bangumi插件初始化成功")
+
         except ValueError as e:
             logger.error(f"插件初始化失败: {e}")
+
+    async def initialize(self):
+        logger.info("正在检查并安装插件依赖...")
+        try:
+            # 安装 Playwright 系统依赖
+            logger.info("正在运行 playwright install-deps...")
+            process = await asyncio.create_subprocess_shell(
+                "playwright install-deps",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, stderr = await process.communicate()
+            if process.returncode != 0:
+                logger.warning(f"系统依赖安装可能失败 (非关键错误): {stderr.decode()}")
+                return
+            logger.info("系统依赖安装完成")
+
+            # 安装 Playwright Chromium
+            logger.info("正在安装 Playwright Chromium...")
+            process = await asyncio.create_subprocess_shell(
+                "playwright install chromium",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, stderr = await process.communicate()
+
+            if process.returncode == 0:
+                logger.info("Playwright Chromium 安装成功")
+            else:
+                logger.warning(f"Playwright Chromium 安装返回错误: {stderr.decode()}")
+            logger.info("Bangumi插件初始化成功")
+        except Exception as e:
+            logger.error(f"依赖安装流程失败: {e}")
 
     # --- 内部核心逻辑 ---
 
@@ -66,6 +104,7 @@ class BangumiPlugin(Star):
             tuple[list[Comp.Image], list[str]]:
                 - 生成的图片组件列表
                 - 产生的临时文件路径列表（需要调用者负责清理）
+                - 成功的条目ID列表
         """
         image_components = []
         temp_files = []
@@ -97,28 +136,29 @@ class BangumiPlugin(Star):
             os.close(tmp_fd)  # 立即关闭文件描述符，只保留路径
             temp_files.append(tmp_path)
 
-            try:
+        try:
                 await renderer.render_subject_card(
                     subject_data,
                     output_path=tmp_path,
                     max_retries=self.config_manager.get_max_retries(),
-                )
+            )
 
                 if os.path.exists(tmp_path) and os.path.getsize(tmp_path) > 0:
                     image_components.append(Comp.Image.fromFileSystem(tmp_path))
                 else:
                     logger.warning(f"图片生成失败: {subject_id}")
-            except Exception as e:
+        except Exception as e:
                 logger.error(f"渲染条目 {subject_id} 失败: {e}")
 
         return image_components, temp_files
 
-    async def _handle_search(
+    async def _handle_subject(
         self,
         event: AstrMessageEvent,
         query: str,
         top_k: int | None = None,
         subject_type: list[int] | None = None,
+        subject_tags: list[str] | None = None,
     ):
         """
         通用搜索处理逻辑：搜索 -> 渲染 -> 发送 -> 清理
@@ -143,17 +183,19 @@ class BangumiPlugin(Star):
 
         try:
             # 1. 搜索条目
-            search_res = await self.service.search_subjects(query, type=subject_type)
+            search_res = await self.service.search_subjects(
+                keyword=query, subject_type=subject_type, subject_tags=subject_tags
+            )
             if not search_res or "data" not in search_res or not search_res["data"]:
                 yield event.plain_result("🔍 未找到相关条目")
                 return
 
-            logger.info(f"搜索结果数量: {len(search_res['data'])}")
-
             # 2. 渲染条目
-            image_components, temp_files = await self._render_subjects(
-                search_res["data"], top_k
-            )
+            (
+                image_components,
+                temp_files,
+                subjects_id_list,
+            ) = await self._render_subjects(search_res["data"], top_k)
 
             # 3. 发送图片
             if image_components:
@@ -176,6 +218,59 @@ class BangumiPlugin(Star):
             logger.error(f"处理搜索请求失败: {e}")
             yield event.plain_result(f"❌ 处理失败: {e}")
 
+    async def _handle_calendar(
+        self, event: AstrMessageEvent, api_result: list[dict[str, Any]] | None = None
+    ):
+        if not self.service:
+            yield event.plain_result("❌ 配置未完成")
+            return
+
+        try:
+            # 1. 获取每日放送
+            calendar_res = await self.service.get_calendar()
+
+            if not calendar_res:
+                yield event.plain_result("❌ 未获取到放送数据")
+                return
+
+            # 2. 渲染图片
+            renderer = CalendarRenderer()
+
+            # 创建临时文件
+            tmp_fd, tmp_path = tempfile.mkstemp(suffix=".png")
+            os.close(tmp_fd)
+
+            try:
+                await renderer.render_calendar(
+                    calendar_res,
+                    output_path=tmp_path,
+                    max_retries=self.config_manager.get_max_retries(),
+                )
+
+                # 3. 发送图片
+                if os.path.exists(tmp_path) and os.path.getsize(tmp_path) > 0:
+                    yield event.chain_result([Comp.Image.fromFileSystem(tmp_path)])
+                else:
+                    yield event.plain_result("❌ 图片生成失败")
+
+                # 4. 清理临时文件
+                await asyncio.sleep(1)
+                if os.path.exists(tmp_path):
+                    os.remove(tmp_path)
+
+            except Exception as e:
+                logger.error(f"渲染放送表失败: {e}")
+                yield event.plain_result(f"❌ 渲染失败: {e}")
+                if os.path.exists(tmp_path):
+                    try:
+                        os.remove(tmp_path)
+                    except:
+                        pass
+
+        except Exception as e:
+            logger.error(f"处理每日放送失败: {e}")
+            yield event.plain_result(f"❌ 处理失败: {e}")
+
     # --- 命令处理区 ---
 
     @filter.command("bgm搜索")
@@ -185,15 +280,111 @@ class BangumiPlugin(Star):
         """
         通用搜索命令
         """
-        async for result in self._handle_search(event, query, top_k, subject_type=None):
+        async for result in self._handle_subject(event, query, top_k, subject_type=None):
             yield result
 
-    @filter.command("bgm动画")
+    @filter.command("bgm番剧")
     async def search_anime(
         self, event: AstrMessageEvent, query: str, top_k: int | None = None
     ):
         """
-        搜索动画命令 (type=2)
+        搜索番剧
         """
-        async for result in self._handle_search(event, query, top_k, subject_type=[2]):
+        async for result in self._handle_subject(
+            event, query, top_k, subject_type=[2], subject_tags=["TV"]
+        ):
             yield result
+
+    @filter.command("bgm剧场版")
+    async def search_movie(
+        self, event: AstrMessageEvent, query: str, top_k: int | None = None
+    ):
+        """
+        搜索剧场版
+        """
+        async for result in self._handle_subject(
+            event, query, top_k, subject_type=[2], subject_tags=["剧场版"]
+        ):
+            yield result
+
+    @filter.command("bgm漫画")
+    async def search_manga(
+        self, event: AstrMessageEvent, query: str, top_k: int | None = None
+    ):
+        """
+        搜索漫画
+        """
+        async for result in self._handle_subject(
+            event, query, top_k, subject_type=[1], subject_tags=["漫画"]
+        ):
+            yield result
+
+    @filter.command("today")
+    async def calender(self, event: AstrMessageEvent):
+        async for result in self._handle_calendar(event):
+            yield result
+
+    @filter.command("追番")
+    async def subscribe(self, event: AstrMessageEvent, query: str):
+        if not self.service:
+            yield event.plain_result("❌ 配置未完成")
+            return
+
+        # 获取 group_id
+        group_id = None
+        if hasattr(event, 'message_obj') and hasattr(event.message_obj, 'group_id'):
+            group_id = event.message_obj.group_id
+        
+        if not group_id:
+            yield event.plain_result("❌ 无法获取群组ID，请在群聊中使用")
+            return
+
+        if not query:
+            yield event.plain_result("❌ 请提供番剧名称")
+            return
+            
+        logger.info(f"处理追番请求: {query}, group_id={group_id}")
+
+        try:
+            # 1. 搜索条目
+            search_res = await self.service.search_subjects(
+                keyword=query, subject_type=[2], subject_tags=None
+            )
+            if not search_res or "data" not in search_res or not search_res["data"]:
+                yield event.plain_result("🔍 未找到相关条目")
+                return
+
+            # 2. 渲染条目 (Top 1)
+            (
+                image_components,
+                temp_files,
+                subjects_id_list,
+            ) = await self._render_subjects(search_res["data"], top_k=1)
+
+            # 3. 发送图片
+            if image_components:
+                yield event.chain_result(image_components)
+            else:
+                yield event.plain_result("❌ 未能生成图片")
+                return
+
+            # 4. 存储订阅
+            if subjects_id_list:
+                subject_id = subjects_id_list[0]
+                if self.storage.add_subscription(group_id, str(subject_id)):
+                    yield event.plain_result(f"✅ 已成功添加订阅 (ID: {subject_id})")
+                else:
+                    yield event.plain_result(f"⚠️ 订阅可能已存在或保存失败")
+            
+            # 5. 清理临时文件
+            await asyncio.sleep(1)
+            for path in temp_files:
+                try:
+                    if os.path.exists(path):
+                        os.remove(path)
+                except Exception as e:
+                    logger.warning(f"清理临时文件失败 {path}: {e}")
+
+        except Exception as e:
+            logger.error(f"处理追番请求失败: {e}")
+            yield event.plain_result(f"❌ 处理失败: {e}")

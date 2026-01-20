@@ -14,7 +14,12 @@ class SubjectsService(BaseBangumiService):
         }
 
     async def search_subjects(
-        self, keyword: str, limit: int = 5, offset: int = 0, type: int | None = None
+        self,
+        keyword: str,
+        limit: int = 5,
+        offset: int = 0,
+        subject_type: list[int] | None = None,
+        subject_tags: list[str] | None = None,
     ) -> Dict[str, Any]:
         cache_key = f"search:{keyword}:{limit}"
         if cache_key in self.search_cache:
@@ -25,9 +30,12 @@ class SubjectsService(BaseBangumiService):
             "keyword": keyword,
             "limit": limit,
             "offset": offset,
+            "filter": {},
         }
-        if type is not None:
-            json_data["filter"] = {"type": type}
+        if subject_type is not None:
+            json_data["filter"]["type"] = subject_type
+        if subject_tags is not None:
+            json_data["filter"]["tag"] = subject_tags
         data = await self._request(
             url,
             method="POST",

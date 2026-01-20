@@ -35,7 +35,7 @@ class BaseBangumiService:
         method: str = "GET",
         params: Dict[str, Any] | None = None,
         json_data: Dict[str, Any] | None = None,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any] | list[Any]:
         """
         通用API请求函数，带限流和重试处理
         """
