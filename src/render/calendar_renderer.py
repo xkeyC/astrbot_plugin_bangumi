@@ -5,8 +5,8 @@ import jinja2
 from astrbot.api import logger
 import datetime
 
-from utils.browser import create_page
-from utils.async_utils import retry
+from ..utils.browser import create_page
+from ..utils.async_utils import retry
 
 
 def reorder_days(calendar_data: List[Dict[str, Any]]) -> List[Dict[str, Any]]:

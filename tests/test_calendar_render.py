@@ -87,7 +87,7 @@ async def main():
     os.makedirs("tests", exist_ok=True)
 
     print("开始渲染放送表...")
-    result = await renderer.rendejsonr_calendar(
+    result = await renderer.render_calendar(
         calendar_data=sample_data, output_path=output_path
     )
 

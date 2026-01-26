@@ -5,3 +5,4 @@ data/
 *.xml
 *.iml
 .env
+.png
