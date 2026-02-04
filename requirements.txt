@@ -2,5 +2,9 @@ playwright
 jinja2
 pillow
 aiohttp
+apscheduler
+pytz
 
 SQLAlchemy
+
+astrbot

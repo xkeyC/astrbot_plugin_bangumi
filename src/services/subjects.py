@@ -45,5 +45,16 @@ class SubjectsService(BaseBangumiService):
         return data
 
     async def get_subject_details(self, subject_id: int) -> Dict[str, Any]:
+        """
+        获取条目的信息
+        """
         url = f"{self.base_url}/v0/subjects/{subject_id}"
         return await self._request(url)
+
+    async def get_subject_episodes(self, subject_id: int) -> Dict[str, Any]:
+        """
+        获取条目的章节信息
+        """
+        url = f"{self.base_url}/v0/episodes"
+        params = {"subject_id": subject_id}
+        return await self._request(url, params=params)

@@ -13,6 +13,7 @@ from astrbot.api.star import Context, Star, register
 from .src.config.config_manager import ConfigManager
 from .src.render.calendar_renderer import CalendarRenderer
 from .src.render.subject_renderer import SubjectRenderer
+from .src.utils.scheduler import SchedulerManager
 
 # 导入我们重构后的统一API类
 from .src.services import BangumiService
@@ -31,6 +32,7 @@ class BangumiPlugin(Star):
         super().__init__(context)
         self.config = config
         self.config_manager = ConfigManager(config)
+        self.scheduler_manager = SchedulerManager()
         self.max_fuzzy_results = 10
         
         # 1. 优先初始化存储，确保即使网络配置失败也能访问数据库
@@ -107,8 +109,29 @@ class BangumiPlugin(Star):
                 logger.warning(f"Playwright Chromium 安装返回错误: {stderr.decode()}")
                 
             logger.info("Bangumi插件初始化成功")
+
+            # --- 调度器使用示例 ---
+            # 下方是一个示例，展示如何添加一个每30秒执行一次的定时任务
+            # job_id = self.scheduler_manager.add_job(self._my_scheduled_task, 'interval', seconds=30, args=["这是一个参数"])
+            # print(f"添加了定时任务，ID: {job_id}")
+            #
+            # # 如果需要，可以这样取消任务
+            # # self.scheduler_manager.cancel_job(job_id)
+
         except Exception as e:
             logger.error(f"依赖安装流程失败: {e}")
+
+    def __del__(self):
+        """
+        插件实例销毁时调用，用于清理资源
+        """
+        self.scheduler_manager.shutdown()
+
+    async def _my_scheduled_task(self, arg: str):
+        """
+        一个定时任务的示例函数
+        """
+        logger.info(f"这是一个定时任务! 参数: {arg}")
 
     # --- 内部核心逻辑 ---
 
@@ -440,3 +463,11 @@ class BangumiPlugin(Star):
         except Exception as e:
             logger.error(f"处理追番请求失败: {e}")
             yield event.plain_result(f"❌ 处理失败: {e}")
+
+    def terminate(self):
+        """
+        这里杀掉旧任务！
+        """
+        logger.info("正在清理旧的调度器...")
+        if self.scheduler_manager.scheduler.running:
+            self.scheduler_manager.scheduler.shutdown(wait=False) # 强制关闭
