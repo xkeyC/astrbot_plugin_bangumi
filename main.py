@@ -1,7 +1,7 @@
 import asyncio
 import os
 import tempfile
-from typing import Any
+import datetime
 
 import astrbot.api.message_components as Comp
 from astrbot.api import logger
@@ -29,6 +29,14 @@ from .src.services.storage import StorageManager
 )
 class BangumiPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
+        """
+        初始化 BangumiPlugin 插件。
+        负责设置插件的上下文、配置、配置管理器、调度管理器、最大模糊搜索结果数，
+        并初始化存储和 Bangumi API 服务。
+
+        :param context: 插件的上下文对象，用于访问 AstrBot 核心功能。
+        :param config: AstrBot 的配置对象，包含插件所需的各种配置。
+        """
         super().__init__(context)
         self.config = config
         self.config_manager = ConfigManager(config)
@@ -65,8 +73,12 @@ class BangumiPlugin(Star):
 
     async def initialize(self):
         """
-        插件加载时自动运行
-        检查并安装依赖 (仅首次运行)
+        插件加载时自动运行的初始化方法。
+        检查并安装必要的依赖（如 Playwright 及其 Chromium 浏览器），仅在首次运行时执行。
+        成功安装后会创建标记文件以跳过后续检查。
+        同时，会添加定时任务用于更新番剧信息。
+
+        :return: None
         """
         # 获取插件数据目录
         from astrbot.core.utils.astrbot_path import get_astrbot_data_path
@@ -89,7 +101,6 @@ class BangumiPlugin(Star):
             _, stderr = await process.communicate()
             if process.returncode != 0:
                 logger.warning(f"系统依赖安装可能失败 (非关键错误): {stderr.decode()}")
-                # 注意：这里不return，尝试继续安装chromium
 
             # 安装 Playwright Chromium
             logger.info("正在安装 Playwright Chromium...")
@@ -110,28 +121,69 @@ class BangumiPlugin(Star):
                 
             logger.info("Bangumi插件初始化成功")
 
-            # --- 调度器使用示例 ---
-            # 下方是一个示例，展示如何添加一个每30秒执行一次的定时任务
-            # job_id = self.scheduler_manager.add_job(self._my_scheduled_task, 'interval', seconds=30, args=["这是一个参数"])
-            # print(f"添加了定时任务，ID: {job_id}")
-            #
-            # # 如果需要，可以这样取消任务
-            # # self.scheduler_manager.cancel_job(job_id)
-
+            # 定时更新番剧信息
+            self.scheduler_manager.add_job(func=self.update_episodes, trigger="cron", minute=0)
         except Exception as e:
             logger.error(f"依赖安装流程失败: {e}")
 
-    def __del__(self):
+    async def update_episodes(self):
         """
-        插件实例销毁时调用，用于清理资源
-        """
-        self.scheduler_manager.shutdown()
+        一个定时任务函数，用于更新所有已订阅番剧的最新集数信息。
+        它会获取当前所有要追的番剧列表，并进行相应的更新操作（具体更新逻辑待实现）。
 
-    async def _my_scheduled_task(self, arg: str):
+        :return: None
         """
-        一个定时任务的示例函数
-        """
-        logger.info(f"这是一个定时任务! 参数: {arg}")
+        
+        # 获取当前所有要追的番，维护一个列表
+        bangumi_list = self.storage.get_monitored_subjects()
+        current_datetime = datetime.datetime.now()
+
+        for subject in bangumi_list:
+            try:
+                episodes_data = await self.service.get_subject_episodes(int(subject.subject_id))
+                if not episodes_data or "data" not in episodes_data:
+                    logger.warning(f"获取番剧 {subject.name} ({subject.subject_id}) 剧集信息失败，跳过。")
+                    continue
+                
+                latest_notifiable_episode_number = subject.current_episode
+                
+                for episode in episodes_data["data"]:
+                    episode_number = episode.get("ep", 0)
+                    episode_airdate_str = episode.get("airdate")
+                    episode_comment_count = episode.get("comment", 0)
+
+                    if episode_number == 0: # Skip if episode number is not valid
+                        continue
+
+                    is_aired = False
+                    if episode_airdate_str:
+                        try:
+                            episode_airdate = datetime.datetime.strptime(episode_airdate_str, "%Y-%m-%d").date()
+                            if episode_airdate <= current_datetime.date():
+                                is_aired = True
+                        except ValueError:
+                            logger.warning(f"番剧 {subject.name} ({subject.subject_id}) 剧集 {episode_number} 的 airdate 格式错误: {episode_airdate_str}")
+                            pass # Continue without airdate check if format is wrong
+                    
+                    has_comments = (episode_comment_count != 0)
+
+                    # Determine if this episode is "released and notifiable"
+                    # An episode is considered released if:
+                    # 1. It's a new episode (ep > current_episode in DB)
+                    # 2. AND (its airdate has passed OR it has comments, indicating actual availability)
+                    if episode_number > subject.current_episode and (is_aired or has_comments):
+                        latest_notifiable_episode_number = max(latest_notifiable_episode_number, episode_number)
+                
+                if latest_notifiable_episode_number > subject.current_episode:
+                    logger.info(f"番剧《{subject.name}》({subject.subject_id}) 有更新：从 {subject.current_episode} 更新到 {latest_notifiable_episode_number}")
+                    self.storage.update_subject(
+                        subject_id=subject.subject_id,
+                        current_episode=latest_notifiable_episode_number
+                    )
+                    # TODO: Add notification logic here (e.g., self.notify_subscribers(subject, latest_notifiable_episode_number))
+                
+            except Exception as e:
+                logger.error(f"处理番剧 {subject.name} ({subject.subject_id}) 更新失败: {e}")
 
     # --- 内部核心逻辑 ---
 
@@ -140,16 +192,19 @@ class BangumiPlugin(Star):
     ) -> tuple[list[Comp.Image], list[str], list[str]]:
         """
         核心渲染逻辑：处理条目列表，获取详情并生成图片。
+        从给定的条目列表中获取指定数量的条目详情，然后使用 `SubjectRenderer`
+        将这些条目渲染成图片，并返回图片组件、临时文件路径和成功的条目ID列表。
 
-        Args:
-            subjects: 条目列表，可以是包含 'id' 的字典列表，也可以是 ID 列表。
-            top_k: 最大处理数量。
+        :param subjects: 条目列表，可以是包含 'id' 的字典列表，也可以是 ID 列表。
+                         例如：`[{'id': 123, 'name': 'Anime Name'}, ...]` 或 `[123, 456]`。
+        :param top_k: 最大处理数量。表示从 `subjects` 列表中最多处理的条目数量。
+                      默认为 1。
 
-        Returns:
-            tuple[list[Comp.Image], list[str], list[str]]:
-                - 生成的图片组件列表
-                - 产生的临时文件路径列表（需要调用者负责清理）
-                - 成功的条目ID列表
+        :return: 一个包含三个元素的元组：
+                 - `list[Comp.Image]`: 生成的图片组件列表，每个组件代表一个渲染的条目图片。
+                 - `list[str]`: 产生的临时文件路径列表，这些文件包含了渲染的图片。
+                                调用者负责在图片发送后清理这些临时文件。
+                 - `list[str]`: 成功获取并渲染的条目 ID 列表。
         """
         subjects_id_list = []
         data_list = []
@@ -200,8 +255,18 @@ class BangumiPlugin(Star):
         subject_tags: list[str] | None = None,
     ):
         """
-        渲染图片全流程
-        通用搜索处理逻辑：搜索 -> 渲染 -> 发送 -> 清理
+        通用搜索处理逻辑：搜索 -> 渲染 -> 发送 -> 清理。
+        根据查询字符串和可选的类型、标签搜索 Bangumi 条目，然后渲染成图片并发送。
+        处理过程中会生成临时图片文件，并在发送后进行清理。
+
+        :param event: 消息平台事件对象，用于发送回复。
+        :param query: 查询字符串或条目 ID。
+        :param top_k: 与查询内容最接近的 `k` 个搜索结果。默认为 1。
+        :param subject_type: 查询内容的类型列表，例如 [1] 表示书籍，[2] 表示动画等。
+        :param subject_tags: 查询内容的标签列表，例如 ["TV"]。
+
+        :yield: 异步迭代器，每次产出一个 AstrMessageEvent.plain_result 或 AstrMessageEvent.chain_result 对象，
+                用于向用户发送文本消息或图片消息。
         """
         if not self.service:
             yield event.plain_result("❌ 配置未完成")
@@ -259,6 +324,16 @@ class BangumiPlugin(Star):
     async def _handle_calendar(
         self, event: AstrMessageEvent, api_result: list[dict[str, Any]] | None = None
     ):
+        """
+        处理 Bangumi 每日放送的渲染和发送逻辑。
+        获取每日放送数据，渲染成日历图片，然后发送给用户，并清理临时文件。
+
+        :param event: 消息平台事件对象，用于发送回复。
+        :param api_result: (可选) 预先获取的 API 结果，如果提供则跳过 API 调用。
+
+        :yield: 异步迭代器，每次产出一个 AstrMessageEvent.plain_result 或 AstrMessageEvent.chain_result 对象，
+                用于向用户发送文本消息或图片消息。
+        """
         if not self.service:
             yield event.plain_result("❌ 配置未完成")
             return
@@ -316,7 +391,15 @@ class BangumiPlugin(Star):
         self, event: AstrMessageEvent, query: str, top_k: int | None = None
     ):
         """
-        通用搜索命令
+        通用搜索命令。
+        通过 `_handle_subject` 方法处理用户的通用搜索请求，
+        可以搜索任何类型的 Bangumi 条目（动画、书籍、音乐、游戏、三次元）。
+
+        :param event: 消息平台事件对象。
+        :param query: 用户的搜索关键词。
+        :param top_k: (可选) 与查询内容最接近的 `k` 个搜索结果。默认为 1。
+
+        :yield: 异步迭代器，产出搜索结果。
         """
         async for result in self._handle_subject(
             event, query, top_k, subject_type=None
@@ -328,7 +411,15 @@ class BangumiPlugin(Star):
         self, event: AstrMessageEvent, query: str, top_k: int | None = None
     ):
         """
-        搜索番剧
+        搜索番剧命令。
+        通过 `_handle_subject` 方法处理用户的番剧搜索请求，
+        限定搜索类型为动画 (subject_type=[2]) 且标签包含 "TV"。
+
+        :param event: 消息平台事件对象。
+        :param query: 用户的番剧搜索关键词。
+        :param top_k: (可选) 与查询内容最接近的 `k` 个搜索结果。默认为 1。
+
+        :yield: 异步迭代器，产出番剧搜索结果。
         """
         async for result in self._handle_subject(
             event, query, top_k, subject_type=[2], subject_tags=["TV"]
@@ -340,7 +431,15 @@ class BangumiPlugin(Star):
         self, event: AstrMessageEvent, query: str, top_k: int | None = None
     ):
         """
-        搜索剧场版
+        搜索剧场版命令。
+        通过 `_handle_subject` 方法处理用户的剧场版搜索请求，
+        限定搜索类型为动画 (subject_type=[2]) 且标签包含 "剧场版"。
+
+        :param event: 消息平台事件对象。
+        :param query: 用户的剧场版搜索关键词。
+        :param top_k: (可选) 与查询内容最接近的 `k` 个搜索结果。默认为 1。
+
+        :yield: 异步迭代器，产出剧场版搜索结果。
         """
         async for result in self._handle_subject(
             event, query, top_k, subject_type=[2], subject_tags=["剧场版"]
@@ -352,7 +451,15 @@ class BangumiPlugin(Star):
         self, event: AstrMessageEvent, query: str, top_k: int | None = None
     ):
         """
-        搜索漫画
+        搜索漫画命令。
+        通过 `_handle_subject` 方法处理用户的漫画搜索请求，
+        限定搜索类型为书籍 (subject_type=[1]) 且标签包含 "漫画"。
+
+        :param event: 消息平台事件对象。
+        :param query: 用户的漫画搜索关键词。
+        :param top_k: (可选) 与查询内容最接近的 `k` 个搜索结果。默认为 1。
+
+        :yield: 异步迭代器，产出漫画搜索结果。
         """
         async for result in self._handle_subject(
             event, query, top_k, subject_type=[1], subject_tags=["漫画"]
@@ -360,13 +467,29 @@ class BangumiPlugin(Star):
             yield result
 
     @filter.command("today")
-    async def calender(self, event: AstrMessageEvent):
+    async def calendar(self, event: AstrMessageEvent):
+        """
+        获取今日番剧放送表命令。
+        通过 `_handle_calendar` 方法处理用户的请求，获取并发送今日的番剧放送列表。
+
+        :param event: 消息平台事件对象。
+
+        :yield: 异步迭代器，产出日历图片或错误消息。
+        """
         async for result in self._handle_calendar(event):
             yield result
 
     @filter.command("bgm_debug")
     async def bgm_debug(self, event: AstrMessageEvent):
-        """调试指令：查看数据库状态"""
+        """
+        调试指令：查看数据库状态。
+        用于检查插件内部存储 (SQLite 数据库) 的路径、文件大小以及其中存储的 BangumiSubject 和 Subscription 数量。
+        如果数据库查询失败，也会返回相应的错误信息。
+
+        :param event: 消息平台事件对象。
+
+        :yield: 异步迭代器，产出包含数据库状态信息的文本消息。
+        """
         if not self.storage:
             yield event.plain_result("Storage not initialized")
             return
@@ -403,6 +526,16 @@ class BangumiPlugin(Star):
 
     @filter.command("追番")
     async def subscribe(self, event: AstrMessageEvent, query: str):
+        """
+        订阅番剧命令。
+        用户通过提供番剧名称来订阅番剧，插件会将该番剧添加到数据库中，
+        并在番剧更新时向发送订阅请求的群组推送消息。
+
+        :param event: 消息平台事件对象，用于获取群组 ID 和发送回复。
+        :param query: 用户提供的番剧名称或关键词。
+
+        :yield: 异步迭代器，产出订阅成功或失败的文本消息。
+        """
         if not self.service:
             yield event.plain_result("❌ 配置未完成")
             return
@@ -466,7 +599,10 @@ class BangumiPlugin(Star):
 
     def terminate(self):
         """
-        这里杀掉旧任务！
+        插件终止时自动运行的清理方法。
+        负责关闭调度器中运行的定时任务，确保插件优雅地停止。
+
+        :return: None
         """
         logger.info("正在清理旧的调度器...")
         if self.scheduler_manager.scheduler.running:
