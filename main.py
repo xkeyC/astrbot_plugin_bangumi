@@ -2,6 +2,7 @@ import asyncio
 import os
 import tempfile
 import datetime
+from typing import Any
 
 import astrbot.api.message_components as Comp
 from astrbot.api import logger
@@ -126,6 +127,19 @@ class BangumiPlugin(Star):
         except Exception as e:
             logger.error(f"依赖安装流程失败: {e}")
 
+    async def notify_subscribers(self, subject_id: str, subject_name: str, new_episode_number: int):
+        """
+        向订阅了指定番剧的所有群组发送更新通知。
+        """
+        subscribed_groups = self.storage.get_subject_subscribers(subject_id)
+        message = f"《{subject_name}》更新啦！当前最新集数：{new_episode_number}"
+        for group_id in subscribed_groups:
+            try:
+                await self.context.send_group_message(group_id=group_id, message=message)
+                logger.info(f"向群组 {group_id} 发送《{subject_name}》更新通知成功。")
+            except Exception as e:
+                logger.error(f"向群组 {group_id} 发送《{subject_name}》更新通知失败: {e}")
+
     async def update_episodes(self):
         """
         一个定时任务函数，用于更新所有已订阅番剧的最新集数信息。
@@ -180,7 +194,12 @@ class BangumiPlugin(Star):
                         subject_id=subject.subject_id,
                         current_episode=latest_notifiable_episode_number
                     )
-                    # TODO: Add notification logic here (e.g., self.notify_subscribers(subject, latest_notifiable_episode_number))
+                    # Add notification logic here (e.g., self.notify_subscribers(subject, latest_notifiable_episode_number))
+                    await self.notify_subscribers(
+                        subject_id=subject.subject_id,
+                        subject_name=subject.name,
+                        new_episode_number=latest_notifiable_episode_number
+                    )
                 
             except Exception as e:
                 logger.error(f"处理番剧 {subject.name} ({subject.subject_id}) 更新失败: {e}")
