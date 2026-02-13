@@ -11,6 +11,8 @@ from ..utils.browser import create_page
 
 def preprocess_data(data: Dict[str, Any]) -> Dict[str, Any]:
     """预处理数据以适配模板"""
+    import datetime
+
     processed = data.copy()
 
     # 处理图片 URL
@@ -43,6 +45,56 @@ def preprocess_data(data: Dict[str, Any]) -> Dict[str, Any]:
             processed["platform"] = type_map.get(type_id, "未知")
         except (ValueError, TypeError):
             processed["platform"] = "未知"
+
+    # 处理 episodes 数据：标记每集的播出状态
+    if "episodes" in processed:
+        today = datetime.date.today()
+        episode_list = []
+        aired_weekdays: list[int] = []
+        for ep in processed["episodes"]:
+            # 只处理正片（type == 0），跳过 SP 等
+            if ep.get("type", 0) != 0:
+                continue
+            ep_num = ep.get("ep", 0)
+            if ep_num == 0:
+                continue
+
+            aired = False
+            airdate_str = ep.get("airdate")
+            if airdate_str:
+                try:
+                    airdate = datetime.datetime.strptime(airdate_str, "%Y-%m-%d").date()
+                    aired = airdate <= today
+                    # 收集已播出集的星期用于推算更新日
+                    if aired:
+                        aired_weekdays.append(airdate.isoweekday())
+                except ValueError:
+                    pass
+            # 有评论也视为已播出
+            if ep.get("comment", 0) > 0:
+                aired = True
+
+            episode_list.append({"ep": ep_num, "aired": aired})
+
+        processed["episode_list"] = episode_list
+
+        # 从最近几集推算更新日（取最常见的星期）
+        if aired_weekdays:
+            from collections import Counter
+
+            weekday_names = {
+                1: "月",
+                2: "火",
+                3: "水",
+                4: "木",
+                5: "金",
+                6: "土",
+                7: "日",
+            }
+            # 取最近 4 集的星期，避免早期特殊排期干扰
+            recent = aired_weekdays[-4:]
+            most_common = Counter(recent).most_common(1)[0][0]
+            processed["air_weekday"] = weekday_names.get(most_common, "")
 
     return processed
 

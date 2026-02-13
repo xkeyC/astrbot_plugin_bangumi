@@ -233,6 +233,15 @@ class BangumiPlugin(Star):
             if len(subject_data) == 0:
                 logger.warning(f"获取条目 {subject_id} 详情失败，跳过")
                 continue
+
+            # 获取剧集信息用于渲染 episode 进度
+            try:
+                episodes_data = await self.service.get_subject_episodes(subject_id)
+                if episodes_data and "data" in episodes_data:
+                    subject_data["episodes"] = episodes_data["data"]
+            except Exception as e:
+                logger.warning(f"获取条目 {subject_id} 剧集信息失败: {e}")
+
             data_list.append(subject_data)
 
             # 创建临时文件
