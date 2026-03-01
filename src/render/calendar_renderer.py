@@ -25,6 +25,7 @@ class CalendarRenderer(BaseRenderer):
     async def render_calendar(
         self,
         calendar_data: List[Dict[str, Any]],
+        rpc_url: Optional[str] = None,
         headless: bool = True,
         max_retries: int = 3,
     ) -> Optional[str]:
@@ -37,11 +38,12 @@ class CalendarRenderer(BaseRenderer):
             logger.error(f"处理日历数据失败: {e}")
             return None
 
-        return await self._render_to_base64(
+        return await self.render(
             template_path="calendar/calendar.html",
             render_data={"days": reordered_days},
             selector=".container",
             sub_dir="calendar",
+            rpc_url=rpc_url,
             headless=headless,
             max_retries=max_retries,
             timeout=30000,

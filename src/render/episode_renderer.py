@@ -8,6 +8,7 @@ class EpisodeRenderer(BaseRenderer):
     async def render_episode(
         self,
         episode_data: Episode,
+        rpc_url: Optional[str] = None,
         headless: bool = True,
         max_retries: int = 3,
     ) -> Optional[str]:
@@ -22,10 +23,11 @@ class EpisodeRenderer(BaseRenderer):
             else episode_data
         )
 
-        return await self._render_to_base64(
+        return await self.render(
             template_path="update/episode2.html",
             render_data=render_data,
             selector="#card-container",
+            rpc_url=rpc_url,
             headless=headless,
             max_retries=max_retries,
         )
