@@ -224,7 +224,11 @@ class BangumiPlugin(Star):
         from astrbot.core.message.message_event_result import MessageChain
 
         chain = MessageChain()
-        base64_image: str | None = await renderer.render_episode(episode)
+        base64_image: str | None = await renderer.render_episode(
+            episode,
+            rpc_url=self.config_manager.get_render_server_url(),
+            max_retries=self.config_manager.get_max_retries(),
+        )
         if base64_image:
             chain = chain.base64_image(base64_image)
 
@@ -342,7 +346,10 @@ class BangumiPlugin(Star):
         # 创建渲染器实例
         renderer = SubjectRenderer()
         await renderer.render_batch_subject_cards(
-            data_list=data_list, output_paths=temp_files
+            data_list=data_list, 
+            output_paths=temp_files,
+            rpc_url=self.config_manager.get_render_server_url(),
+            max_retries=self.config_manager.get_max_retries(),
         )
         image_components = []
         try:
@@ -460,6 +467,7 @@ class BangumiPlugin(Star):
             renderer = CalendarRenderer()
             base64_image = await renderer.render_calendar(
                 calendar_res,
+                rpc_url=self.config_manager.get_render_server_url(),
                 max_retries=self.config_manager.get_max_retries(),
             )
 
