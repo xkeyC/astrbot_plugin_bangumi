@@ -38,5 +38,11 @@
     "default": 3,
     "min": 1,
     "max": 10
+  },
+  "render_server_url": {
+    "description": "RPC 渲染服务器地址",
+    "type": "string",
+    "hint": "用于远程渲染图片的 RPC 服务器地址",
+    "default": "https://api.unitedpooh.top/rpc"
   }
 }

@@ -36,6 +36,9 @@ class ConfigManager:
     def get_max_retries(self) -> int:
         return self.config.get("max_retries", 3)
 
+    def get_render_server_url(self) -> str:
+        return self.config.get("render_server_url", "https://api.unitedpooh.top/rpc")
+
     def save_config(self):
         """
         保存bgm插件配置到配置文件中, 并重新加载配置

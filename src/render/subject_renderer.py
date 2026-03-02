@@ -138,21 +138,61 @@ class SubjectRenderer(BaseRenderer):
     async def render_subject_card(
         self,
         data: Dict[str, Any],
+        rpc_url: Optional[str] = None,
         headless: bool = True,
         wait_time: int = 0,
         max_retries: int = 3,
-    ) -> Optional[str]:
+        timeout: int = 30000,
+    ) -> Optional[str]|None:
         """
         渲染条目卡片并返回 Base64 字符串
         """
         render_data = preprocess_data(data)
-
-        return await self._render_to_base64(
+        response_data = await self.render(
             template_path="subject/subject.html",
             render_data=render_data,
             selector="#card",
             sub_dir="subject",
+            rpc_url=rpc_url,
             headless=headless,
             max_retries=max_retries,
             wait_time=wait_time,
+            timeout=timeout,
         )
+        return response_data
+
+
+    async def render_batch_subject_cards(
+        self,
+        data_list: List[Dict[str, Any]],
+        output_paths: List[str],
+        rpc_url: Optional[str] = None,
+        headless: bool = True,
+        wait_time: int = 0,
+        max_retries: int = 3,
+    ) -> None:
+        """
+        批量渲染条目卡片并保存到文件。
+        """
+        if len(data_list) != len(output_paths):
+            logger.error("数据列表和输出路径列表长度不一致")
+            return
+
+        import base64
+
+        for data, path in zip(data_list, output_paths):
+            base64_image = await self.render_subject_card(
+                data=data,
+                rpc_url=rpc_url,
+                headless=headless,
+                wait_time=wait_time,
+                max_retries=max_retries,
+            )
+            if base64_image:
+                try:
+                    with open(path, "wb") as f:
+                        f.write(base64.b64decode(base64_image))
+                except Exception as e:
+                    logger.error(f"保存图片到 {path} 失败: {e}")
+            else:
+                logger.error(f"渲染条目失败，跳过保存到 {path}")
