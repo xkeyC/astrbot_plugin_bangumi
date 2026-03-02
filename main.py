@@ -1,8 +1,5 @@
-import asyncio
 import os
-import sys
 import datetime
-from typing import Any
 
 from astrbot.api import logger
 from astrbot.api.all import AstrBotConfig
@@ -21,14 +18,14 @@ from .src.db import BangumiRepository
 
 
 @register(
-    "astrbot_plugin_bangumi",
-    "Gemini",
+    "astrbot_plugin_bangumi_enhance",
+    "united_pooh",
     "一个用于查询Bangumi条目信息的插件",
-    "1.3.0",
+    "1.0.0",
     "https://github.com/united-pooh/astrbot_plugin_bangumi",
 )
 class BangumiPlugin(Star):
-    def __init__(self, context: Context, config: AstrBotConfig):
+    def __init__(self, context: Context, config: AstrBotConfig) -> None:
         """
         初始化 BangumiPlugin 插件。
         """
@@ -63,23 +60,22 @@ class BangumiPlugin(Star):
         # 2. 初始化业务逻辑服务 (Dependency Injection)
         self.subscription_service = None
         self.search_service = None
-        
+
         if self.service:
             # 搜索服务
             self.search_service = SearchService(
-                service=self.service,
-                config_manager=self.config_manager
+                service=self.service, config_manager=self.config_manager
             )
-            
+
             # 订阅服务
             if self.storage:
                 self.subscription_service = SubscriptionService(
                     repository=self.storage,
                     service=self.service,
-                    config_manager=self.config_manager
+                    config_manager=self.config_manager,
                 )
 
-    async def initialize(self):
+    async def initialize(self) -> None:
         """
         插件加载时自动运行的初始化方法。
         """
@@ -92,13 +88,17 @@ class BangumiPlugin(Star):
 
         # 检查本地渲染环境，但不强制安装（因为 RPC 是首选）
         if not self.env_manager.is_installed():
-            logger.info("本地 Playwright 环境未就绪，将优先使用 RPC 渲染（如果已配置）。")
+            logger.info(
+                "本地 Playwright 环境未就绪，将优先使用 RPC 渲染（如果已配置）。"
+            )
 
         # 添加定时更新任务
         if self.subscription_service:
             try:
                 self.scheduler_manager.add_job(
-                    func=self.subscription_service.check_updates, trigger="cron", minute=0
+                    func=self.subscription_service.check_updates,
+                    trigger="cron",
+                    minute=0,
                 )
                 logger.info("Bangumi 插件定时更新任务已启动")
             except Exception as e:
@@ -109,9 +109,7 @@ class BangumiPlugin(Star):
     # --- 命令处理区 ---
 
     @filter.command("bgm")
-    async def search(
-        self, event: AstrMessageEvent, query: str, top_k: int = 1
-    ):
+    async def search(self, event: AstrMessageEvent, query: str, top_k: int = 1):
         if not self.search_service:
             yield event.plain_result("❌ 搜索服务未就绪")
             return
@@ -121,9 +119,7 @@ class BangumiPlugin(Star):
             yield result
 
     @filter.command("bgm番剧")
-    async def search_anime(
-        self, event: AstrMessageEvent, query: str, top_k: int = 1
-    ):
+    async def search_anime(self, event: AstrMessageEvent, query: str, top_k: int = 1):
         if not self.search_service:
             yield event.plain_result("❌ 搜索服务未就绪")
             return
@@ -133,9 +129,7 @@ class BangumiPlugin(Star):
             yield result
 
     @filter.command("bgm剧场版")
-    async def search_movie(
-        self, event: AstrMessageEvent, query: str, top_k: int = 1
-    ):
+    async def search_movie(self, event: AstrMessageEvent, query: str, top_k: int = 1):
         if not self.search_service:
             yield event.plain_result("❌ 搜索服务未就绪")
             return
@@ -145,9 +139,7 @@ class BangumiPlugin(Star):
             yield result
 
     @filter.command("bgm漫画")
-    async def search_manga(
-        self, event: AstrMessageEvent, query: str, top_k: int = 1
-    ):
+    async def search_manga(self, event: AstrMessageEvent, query: str, top_k: int = 1):
         if not self.search_service:
             yield event.plain_result("❌ 搜索服务未就绪")
             return
@@ -178,11 +170,14 @@ class BangumiPlugin(Star):
 
         msg = [f"DB Path: {self.storage.db_path}"]
         if os.path.exists(self.storage.db_path):
-            msg.append(f"File exists, size: {os.path.getsize(self.storage.db_path)} bytes")
+            msg.append(
+                f"File exists, size: {os.path.getsize(self.storage.db_path)} bytes"
+            )
 
         # 查询数据
         try:
             from .src.db import BangumiSubject
+
             session = self.storage.Session()
             subjects = session.query(BangumiSubject).all()
             msg.append(f"\nSubjects ({len(subjects)}):")

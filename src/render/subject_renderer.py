@@ -1,5 +1,6 @@
 import datetime
 from collections import Counter
+import asyncio
 from typing import Any, Dict, List, Optional, Tuple
 from astrbot.api import logger
 from .base_renderer import BaseRenderer
@@ -161,37 +162,30 @@ class SubjectRenderer(BaseRenderer):
         )
         return response_data
 
-    async def render_batch_subject_cards(
+    async def render_batch_subject_cards_to_base64(
         self,
         data_list: List[Dict[str, Any]],
-        output_paths: List[str],
         rpc_url: Optional[str] = None,
         headless: bool = True,
         wait_time: int = 0,
         max_retries: int = 3,
-    ) -> None:
+        timeout: int = 30000,
+    ) -> List[str]:
         """
-        批量渲染条目卡片并保存到文件。
+        批量渲染条目卡片并直接返回 Base64 字符串列表。
         """
-        if len(data_list) != len(output_paths):
-            logger.error("数据列表和输出路径列表长度不一致")
-            return
-
-        import base64
-
-        for data, path in zip(data_list, output_paths):
-            base64_image = await self.render_subject_card(
-                data=data,
-                rpc_url=rpc_url,
-                headless=headless,
-                wait_time=wait_time,
-                max_retries=max_retries,
+        tasks = []
+        for data in data_list:
+            tasks.append(
+                self.render_subject_card(
+                    data=data,
+                    rpc_url=rpc_url,
+                    headless=headless,
+                    wait_time=wait_time,
+                    max_retries=max_retries,
+                    timeout=timeout,
+                )
             )
-            if base64_image:
-                try:
-                    with open(path, "wb") as f:
-                        f.write(base64.b64decode(base64_image))
-                except Exception as e:
-                    logger.error(f"保存图片到 {path} 失败: {e}")
-            else:
-                logger.error(f"渲染条目失败，跳过保存到 {path}")
+
+        results = await asyncio.gather(*tasks)
+        return [res for res in results if res]

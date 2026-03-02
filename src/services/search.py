@@ -1,16 +1,16 @@
 import asyncio
 import os
-import tempfile
 from typing import List, Optional, Tuple, Any, AsyncGenerator
 
 import astrbot.api.message_components as Comp
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent
 
-from .base import BangumiService
+from ..services import BangumiService
 from ..config.config_manager import ConfigManager
 from ..render.subject_renderer import SubjectRenderer
 from ..render.calendar_renderer import CalendarRenderer
+
 
 class SearchService:
     def __init__(self, service: BangumiService, config_manager: ConfigManager):
@@ -28,7 +28,7 @@ class SearchService:
         subject_tags: Optional[List[str]] = None,
     ) -> AsyncGenerator[Any, None]:
         """
-        处理条目搜索的核心流程：搜索 -> 渲染 -> 封装 -> 清理。
+        处理条目搜索的核心流程：搜索 -> 渲染 (Base64) -> 发送。
         """
         if not query:
             yield event.plain_result("❌ 请提供搜索关键词")
@@ -45,8 +45,10 @@ class SearchService:
                 yield event.plain_result("🔍 未找到相关条目")
                 return
 
-            # 2. 渲染并获取组件
-            image_components, temp_files = await self._prepare_subject_images(search_res["data"], top_k)
+            # 2. 渲染并获取 Base64 组件
+            image_components = await self._prepare_subject_images_base64(
+                search_res["data"], top_k
+            )
 
             # 3. 发送结果
             if image_components:
@@ -54,21 +56,13 @@ class SearchService:
             else:
                 yield event.plain_result("❌ 未能生成渲染图片")
 
-            # 4. 清理临时文件 (异步延迟清理，确保图片已发送)
-            if temp_files:
-                await asyncio.sleep(2)
-                for path in temp_files:
-                    try:
-                        if os.path.exists(path):
-                            os.remove(path)
-                    except Exception as e:
-                        logger.warning(f"清理临时文件失败 {path}: {e}")
-
         except Exception as e:
             logger.error(f"SearchService.handle_subject_search 失败: {e}")
             yield event.plain_result(f"❌ 处理失败: {e}")
 
-    async def handle_calendar(self, event: AstrMessageEvent) -> AsyncGenerator[Any, None]:
+    async def handle_calendar(
+        self, event: AstrMessageEvent
+    ) -> AsyncGenerator[Any, None]:
         """
         处理每日放送逻辑。
         """
@@ -92,13 +86,14 @@ class SearchService:
             logger.error(f"SearchService.handle_calendar 失败: {e}")
             yield event.plain_result(f"❌ 处理失败: {e}")
 
-    async def _prepare_subject_images(self, subjects: list, top_k: int) -> Tuple[List[Comp.Image], List[str]]:
+    async def _prepare_subject_images_base64(
+        self, subjects: list, top_k: int
+    ) -> List[Comp.Image]:
         """
-        内部逻辑：准备渲染数据并生成图片。
+        内部逻辑：准备渲染数据并生成 Base64 图片组件。
         """
         data_list = []
-        temp_files = []
-        
+
         for item in subjects[:top_k]:
             subject_id = item.get("id") if isinstance(item, dict) else None
             if not subject_id:
@@ -118,27 +113,16 @@ class SearchService:
                 pass
 
             data_list.append(subject_data)
-            
-            # 创建临时占位文件
-            tmp_fd, tmp_path = tempfile.mkstemp(suffix=".png")
-            os.close(tmp_fd)
-            temp_files.append(tmp_path)
 
         if not data_list:
-            return [], []
+            return []
 
-        # 批量渲染
-        await self.subject_renderer.render_batch_subject_cards(
+        # 批量渲染为 Base64
+        base64_list = await self.subject_renderer.render_batch_subject_cards_to_base64(
             data_list=data_list,
-            output_paths=temp_files,
             rpc_url=self.config_manager.get_render_server_url(),
             max_retries=self.config_manager.get_max_retries(),
         )
 
         # 包装成消息组件
-        image_components = []
-        for path in temp_files:
-            if os.path.exists(path) and os.path.getsize(path) > 0:
-                image_components.append(Comp.Image.fromFileSystem(path))
-        
-        return image_components, temp_files
+        return [Comp.Image.fromBase64(b64) for b64 in base64_list]

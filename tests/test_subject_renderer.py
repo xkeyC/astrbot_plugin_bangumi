@@ -4,7 +4,7 @@ from loguru import logger
 
 @pytest.mark.asyncio
 async def test_render_subject_card_success():
-    # 准备测试数据 (保持外部 URL 不变)
+    # 准备测试数据
     subject_data = {
         "date": "2026-01-11",
         "platform": "TV",
@@ -54,35 +54,17 @@ async def test_render_subject_card_success():
 
     renderer = SubjectRenderer()
 
-    # 运行渲染器，设置较长的超时时间 (60秒)
+    # 运行渲染器
     base64_image = await renderer.render_subject_card(
         rpc_url="https://api.unitedpooh.top/rpc",
         data=subject_data, 
         headless=True,
         timeout=60000
     )
-    base64_image = base64_image.get("image")
 
     # 验证结果
-    assert base64_image is not None, "渲染失败，未返回 Base64 字符串"
+    assert base64_image is not None, "[-] 渲染失败，未返回 Base64 字符串"
     assert isinstance(base64_image, str), "返回值应为 Base64 字符串"
-    assert len(base64_image) > 100, "Base64 字符串过短，可能渲染不完整"
+    assert len(base64_image) > 100, "Base64 字符串过短"
     
-    # 保存图片到 tmp 目录
-    import base64
-    import os
-    
-    # 去掉 Base64 前缀（如果有）
-    if "," in base64_image:
-        base64_data = base64_image.split(",")[1]
-    else:
-        base64_data = base64_image
-        
-    img_data = base64.b64decode(base64_data)
-    output_path = "tmp/test_subject.png"
-    os.makedirs("tmp", exist_ok=True)
-    with open(output_path, "wb") as f:
-        f.write(img_data)
-        
-    print(f"\n渲染成功！图片已保存至: {output_path}")
-    print(f"图片长度: {len(base64_image)} 字符")
+    logger.info(f"[+] 渲染成功！图片长度: {len(base64_image)} 字符")
