@@ -1,6 +1,5 @@
 import asyncio
 import base64
-import json
 from pathlib import Path
 from typing import Optional, Dict, Any
 
@@ -13,7 +12,7 @@ from ..utils.browser import create_page
 
 
 class BaseRenderer:
-    def __init__(self):
+    def __init__(self) -> None:
         # 统一模板目录定位
         self.template_dir = Path(__file__).resolve().parent.parent / "templates"
         self.template_env = jinja2.Environment(
@@ -53,7 +52,9 @@ class BaseRenderer:
             raise RuntimeError("[-] 无法创建浏览器页面")
 
         try:
-            await page.set_content(html_content, wait_until="load", timeout=timeout)
+            await page.set_content(
+                html_content, wait_until="load", timeout=timeout
+            )
 
             if wait_time > 0:
                 await asyncio.sleep(wait_time)
@@ -82,7 +83,7 @@ class BaseRenderer:
         selector: str,
         timeout: int = 30000,
         wait_time: float = 0,
-    ) -> Optional[str] | None:
+    ) -> str | None:
         """
         通过 RPC-JSON 服务器渲染并返回 Base64 字符串。
         """
@@ -102,10 +103,13 @@ class BaseRenderer:
             "id": int(asyncio.get_event_loop().time() * 1000),
         }
 
+        # 显式使用 aiohttp.ClientTimeout，输入 timeout 为毫秒，需转换为秒
+        client_timeout = aiohttp.ClientTimeout(total=timeout / 1000.0)
+
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.post(
-                    rpc_url, json=payload, timeout=timeout
+                    rpc_url, json=payload, timeout=client_timeout
                 ) as response:
                     if response.status != 200:
                         logger.error(

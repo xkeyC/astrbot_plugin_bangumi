@@ -1,11 +1,11 @@
 import asyncio
-from typing import Optional, List
+from typing import Optional, List, Tuple, Dict, Any
 from astrbot.api import logger
 from astrbot.api.star import StarTools
 from astrbot.core.message.message_event_result import MessageChain
 
 from ..db.repository import BangumiRepository
-from ..services import BangumiService
+from . import BangumiService
 from .schemas import Episode
 from .types import ImageSize
 from ..config.config_manager import ConfigManager
@@ -18,11 +18,61 @@ class SubscriptionService:
         repository: BangumiRepository,
         service: BangumiService,
         config_manager: ConfigManager,
-    ):
+    ) -> None:
         self.storage = repository
         self.service = service
         self.config_manager = config_manager
         self.renderer = EpisodeRenderer()
+
+    async def _match_subscribable_subject(
+        self, keyword: str
+    ) -> Tuple[Optional[str], Optional[Dict[str, Any]]]:
+        """
+        查找可订阅的番剧逻辑（从 API 层迁移至此）。
+        """
+        # 1. 搜索
+        search_res = await self.service.search_subjects(
+            keyword=keyword, subject_type=[2], subject_tags=None
+        )
+        if not search_res or "data" not in search_res or not search_res["data"]:
+            return "🔍 未找到相关番剧", None
+
+        target_subject = search_res["data"][0]
+        subject_id = str(target_subject.get("id"))
+
+        # 2. 详情
+        details = await self.service.get_subject_details(subject_id)
+        if not details:
+            return "❌ 获取番剧详情失败", None
+
+        name = details.get("name_cn") or details.get("name")
+
+        # 3. 检查放送列表
+        calendar_res = await self.service.get_calendar()
+        is_in_calendar = False
+        if calendar_res:
+            for day_item in calendar_res:
+                for item in day_item.get("items", []):
+                    if str(item.get("id")) == subject_id:
+                        is_in_calendar = True
+                        break
+                if is_in_calendar:
+                    break
+
+        if not is_in_calendar:
+            return (
+                f"⚠️ {name} 不在当前的每日放送列表中 (可能已完结或未开播)，暂不支持自动追踪。",
+                None,
+            )
+
+        # 构造返回数据
+        result_data = {
+            "subject_id": subject_id,
+            "name": name,
+            "air_date": details.get("date", ""),
+            "total_episodes": details.get("eps", 0),
+        }
+        return None, result_data
 
     async def subscribe(self, group_id: str, query: str) -> str:
         """
@@ -30,10 +80,8 @@ class SubscriptionService:
         """
         logger.info(f"处理追番请求: {query}, group_id={group_id}")
         try:
-            # 1. 匹配条目
-            error_msg, subject_info = await self.service.match_subscribable_subject(
-                query
-            )
+            # 1. 匹配条目 (调用内部迁移后的逻辑)
+            error_msg, subject_info = await self._match_subscribable_subject(query)
             if error_msg:
                 return error_msg
             if not subject_info:
@@ -53,7 +101,7 @@ class SubscriptionService:
             # 3. 添加订阅关系
             success = self.storage.add_subscription(group_id, subject_id)
             if success:
-                return f"✅ 成功订阅《{name}》！如有更新将推送到本群。"
+                return f"✅ 成功订阅《{name}》！\n如有更新将推送到本群。"
             else:
                 return "❌ 订阅失败，数据库错误。"
         except Exception as e:
@@ -66,9 +114,7 @@ class SubscriptionService:
         """
         logger.info(f"处理取消追番请求: {query}, group_id={group_id}")
         try:
-            error_msg, subject_info = await self.service.match_subscribable_subject(
-                query
-            )
+            error_msg, subject_info = await self._match_subscribable_subject(query)
             if error_msg:
                 return error_msg
             if not subject_info:
@@ -105,7 +151,7 @@ class SubscriptionService:
                 # 尝试获取封面图用于渲染
                 try:
                     image_base64 = await self.service.get_subject_base64image(
-                        subject.subject_id, size=ImageSize.MEDIUM
+                        subject.subject_id, size=ImageSize.LARGE
                     )
                     if image_base64:
                         latest_episode.image_url = (
@@ -116,25 +162,21 @@ class SubscriptionService:
 
                 # 比对更新
                 if latest_episode.ep > subject.current_episode:
-                    logger.info(
-                        f"番剧《{subject.name}》有更新: {subject.current_episode} -> {latest_episode.ep}"
-                    )
+                    logger.info(f"番剧《{subject.name}》有更新: {subject.current_episode} -> {latest_episode.ep}")
 
                     # 更新数据库
-                    self.storage.update_subject_episode(
-                        subject.subject_id, latest_episode.ep
-                    )
+                    # 显式转换为 str 以解决 Pylance 对 SQLAlchemy Column 对象的类型报错
+                    self.storage.update_subject_episode(str(subject.subject_id), latest_episode.ep)
 
                     # 发送通知
-                    await self._notify_subscribers(
-                        latest_episode, subject.subject_id, subject.name
-                    )
+                    await self._notify_subscribers(latest_episode, str(subject.subject_id), str(subject.name))
+
             except Exception as e:
                 logger.error(f"更新番剧《{subject.name}》失败: {e}")
 
     async def _notify_subscribers(
         self, episode: Episode, subject_id: str, subject_name: str
-    ):
+    ) -> None:
         """
         渲染并发送更新通知。
         """
@@ -154,8 +196,8 @@ class SubscriptionService:
             chain = chain.base64_image(base64_image)
         else:
             # 如果图片渲染失败，发送纯文本通知作为兜底
-            chain = chain.text(
-                f"🔔 番剧《{subject_name}》更新啦！第 {episode.ep} 集：{episode.name_cn or episode.name}"
+            chain = chain.message(
+                f"🔔 番剧《{subject_name}》更新啦！\n第 {episode.ep} 集：{episode.name_cn or episode.name}"
             )
 
         for group_id in subscribed_groups:

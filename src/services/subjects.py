@@ -43,7 +43,7 @@ class SubjectsService(BaseBangumiService):
         )
         return data
 
-    async def get_subject_details(self, subject_id: int) -> Dict[str, Any]:
+    async def get_subject_details(self, subject_id: str) -> Dict[str, Any]:
         """
         获取条目的信息
         """
@@ -86,7 +86,7 @@ class SubjectsService(BaseBangumiService):
         params = {"subject_id": subject_id}
         return await self._request(url, params=params)
 
-    async def get_latest_episode(self, subject_id: int) -> Optional[Episode]:
+    async def get_latest_episode(self, subject_id: int) -> Episode | None:
         """
         从 episodes 数据中提取最新一集的信息。
         最新一集的定义：已播出且有互动（评论）的普通剧集。

@@ -35,7 +35,7 @@ class CalendarRenderer(BaseRenderer):
         try:
             reordered_days = reorder_days(calendar_data)
         except Exception as e:
-            logger.error(f"处理日历数据失败: {e}")
+            logger.error(f"[-] 处理日历数据失败: {e}")
             return None
 
         return await self.render(
