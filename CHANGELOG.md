@@ -3,16 +3,11 @@
 ## v1.1.1 (Planned)
 
 ### 🏗️ 架构重构路线图 (TODO)
-- [ ] **[Critical] 实现事务原子性 (Unit of Work)**: 重构 `BangumiRepository` 以支持注入 `Session`，确保订阅操作在 Service 层具备完整的 `commit/rollback` 能力。
+- [x] **[Critical] 实现事务原子性 (Unit of Work)**: 重构 `BangumiRepository` 以支持注入 `Session`，确保订阅操作在 Service 层具备完整的 `commit/rollback` 能力。
 - [ ] **[High] 弃坑逻辑本地化**: 优化 `SubscriptionService.unsubscribe`，优先在本地数据库进行模糊匹配，彻底移除取消订阅时的冗余 API 调用。
 - [ ] **[Medium] 引入日历数据缓存**: 实现 `get_calendar` 的 `LRU Cache`（缓存时间 12-24h），避免每次订阅操作都拉取全量放送表。
 - [ ] **[Medium] 搜索歧义处理机制**: 新增候选列表确认流程。当搜索结果存在多个高匹配项时，返回列表供用户选择，而非盲目订阅首项。
-- [ ] **[Low] 领域异常精细化**: 替换宽泛的 `except Exception`，定义专门的 `SubscriptionError` 和 `DatabaseError`，提供更精准的错误反馈。
-
-### 核心架构审计建议
-- **数据一致性**: 当前订阅流程中 `update_subject` 与 `add_subscription` 相互独立，存在脏数据风险。重构后将强制要求在单一事务内完成。
-- **性能优化**: 针对 API 密集型操作（如 `_match_subscribable_subject`）进行瘦身，减少 60% 以上的不必要网络请求。
-- **用户交互**: 强化“追番”指令的确定性，防止由于关键词模糊导致的误订阅。
+- [x] **[Low] 领域异常精细化**: 替换宽泛的 `except Exception`，定义专门的 `SubscriptionError` 和 `DatabaseError`，提供更精准的错误反馈。
 
 ## v1.1.0
 
