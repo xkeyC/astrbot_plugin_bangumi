@@ -12,6 +12,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import joinedload, scoped_session, sessionmaker
 
 from .models import Base, BangumiSubject, Subscription
+from ..services.exceptions import DatabaseError
 
 
 class BangumiRepository:
@@ -42,7 +43,7 @@ class BangumiRepository:
             # 创建 session factory
             self.Session = scoped_session(sessionmaker(bind=engine))
         except Exception as e:
-            logger.error(f"初始化数据库失败: {e}")
+            raise DatabaseError(f"初始化数据库失败: {e}") from e
 
     def update_subject(self, subject_id: str, **kwargs) -> bool:
         """
@@ -78,7 +79,7 @@ class BangumiRepository:
         except Exception as e:
             logger.error(f"更新番剧信息失败: {e}")
             session.rollback()
-            return False
+            raise DatabaseError(f"更新番剧信息失败: {e}") from e
         finally:
             session.close()
 
@@ -105,7 +106,6 @@ class BangumiRepository:
             if not subject:
                 subject = BangumiSubject(subject_id=str(subject_id), name="未知番剧")
                 session.add(subject)
-                session.commit()
 
             existing = (
                 session.query(Subscription)
@@ -118,12 +118,13 @@ class BangumiRepository:
                     group_id=str(group_id), subject_id=str(subject_id)
                 )
                 session.add(new_sub)
-                session.commit()
+
+            session.commit()  # 单次 commit，保证原子性
             return True
         except Exception as e:
             logger.error(f"添加订阅失败: {e}")
             session.rollback()
-            return False
+            raise DatabaseError(f"添加订阅失败: {e}") from e
         finally:
             session.close()
 
@@ -154,7 +155,7 @@ class BangumiRepository:
         except Exception as e:
             logger.error(f"移除订阅失败: {e}")
             session.rollback()
-            return False
+            raise DatabaseError(f"移除订阅失败: {e}") from e
         finally:
             session.close()
 
@@ -175,7 +176,7 @@ class BangumiRepository:
             return [sub.subject_id for sub in subs]
         except Exception as e:
             logger.error(f"获取订阅失败: {e}")
-            return []
+            raise DatabaseError(f"获取订阅失败: {e}") from e
         finally:
             session.close()
 
@@ -198,7 +199,7 @@ class BangumiRepository:
             return subjects
         except Exception as e:
             logger.error(f"获取监控番剧失败: {e}")
-            return []
+            raise DatabaseError(f"获取监控番剧失败: {e}") from e
         finally:
             session.close()
 
@@ -215,6 +216,74 @@ class BangumiRepository:
 
         """
         return self.update_subject(subject_id, current_episode=new_episode)
+
+    def subscribe_subject(
+        self,
+        group_id: str,
+        subject_id: str,
+        name: str,
+        air_date: str = "",
+        total_episodes: int = 0,
+    ) -> bool:
+        """
+        原子性地 upsert 番剧信息并建立订阅关系。
+
+        将 update_subject + add_subscription 合并到单一事务中，
+        避免两次独立调用之间发生异常导致脏数据。
+
+        Args:
+            group_id: 群组 ID
+            subject_id: 番剧 ID
+            name: 番剧名称
+            air_date: 开播日期
+            total_episodes: 总集数
+
+        Returns:
+            操作是否成功
+        """
+        session = self.Session()
+        try:
+            # 1. upsert BangumiSubject
+            subject = (
+                session.query(BangumiSubject)
+                .filter_by(subject_id=str(subject_id))
+                .first()
+            )
+            if not subject:
+                subject = BangumiSubject(
+                    subject_id=str(subject_id),
+                    name=name,
+                    air_date=air_date,
+                    total_episodes=total_episodes,
+                )
+                session.add(subject)
+            else:
+                subject.name = name
+                if air_date:
+                    subject.air_date = air_date
+                if total_episodes:
+                    subject.total_episodes = total_episodes
+
+            # 2. 添加订阅关系（若不存在）
+            existing = (
+                session.query(Subscription)
+                .filter_by(group_id=str(group_id), subject_id=str(subject_id))
+                .first()
+            )
+            if not existing:
+                session.add(
+                    Subscription(group_id=str(group_id), subject_id=str(subject_id))
+                )
+
+            # 3. 单次 commit，保证 subject 与 subscription 同时成功或同时回滚
+            session.commit()
+            return True
+        except Exception as e:
+            logger.error(f"原子订阅失败: {e}")
+            session.rollback()
+            raise DatabaseError(f"原子订阅失败: {e}") from e
+        finally:
+            session.close()
 
     def get_subject_subscribers(self, subject_id: str) -> list[str]:
         """
@@ -235,7 +304,7 @@ class BangumiRepository:
             return [sub.group_id for sub in subs]
         except Exception as e:
             logger.error(f"获取订阅群组失败: {e}")
-            return []
+            raise DatabaseError(f"获取订阅群组失败: {e}") from e
         finally:
             session.close()
 
@@ -253,6 +322,6 @@ class BangumiRepository:
             return [g[0] for g in groups]
         except Exception as e:
             logger.error(f"获取所有订阅群组失败: {e}")
-            return []
+            raise DatabaseError(f"获取所有订阅群组失败: {e}") from e
         finally:
             session.close()

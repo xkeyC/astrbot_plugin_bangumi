@@ -1,12 +1,12 @@
-import asyncio
 import aiohttp
-from typing import Optional, List, Tuple, Dict, Any
+from typing import Optional, Tuple, Dict, Any
 from astrbot.api import logger
 from astrbot.api.star import StarTools
 from astrbot.core.message.message_event_result import MessageChain
 
 from ..db.repository import BangumiRepository
 from . import BangumiService
+from .exceptions import BangumiApiError, DatabaseError, SubscriptionError
 from .schemas import Episode
 from .types import ImageSize
 from ..config.config_manager import ConfigManager
@@ -92,21 +92,19 @@ class SubscriptionService:
             subject_id = subject_info["subject_id"]
             name = subject_info["name"]
 
-            # 2. 更新/存入条目基础信息
-            self.storage.update_subject(
+            # 2 & 3. 原子性地写入条目信息并建立订阅关系
+            success = self.storage.subscribe_subject(
+                group_id=group_id,
                 subject_id=subject_id,
                 name=name,
                 air_date=subject_info["air_date"],
                 total_episodes=subject_info["total_episodes"],
             )
-
-            # 3. 添加订阅关系
-            success = self.storage.add_subscription(group_id, subject_id)
             if success:
                 return f"✅ 成功订阅《{name}》！\n如有更新将推送到本群。"
             else:
                 return "❌ 订阅失败，数据库错误。"
-        except Exception as e:
+        except (BangumiApiError, DatabaseError, SubscriptionError) as e:
             logger.error(f"SubscriptionService.subscribe 失败: {e}")
             return f"❌ 处理失败: {e}"
 
@@ -130,7 +128,7 @@ class SubscriptionService:
                 return f"✅ 已成功取消订阅《{name}》。"
             else:
                 return f"❌ 取消订阅失败：你可能并没有订阅《{name}》。"
-        except Exception as e:
+        except (BangumiApiError, DatabaseError, SubscriptionError) as e:
             logger.error(f"SubscriptionService.unsubscribe 失败: {e}")
             return f"❌ 处理失败: {e}"
 
@@ -159,21 +157,27 @@ class SubscriptionService:
                         latest_episode.image_url = (
                             f"data:image/png;base64,{image_base64}"
                         )
-                except Exception as e:
+                except BangumiApiError as e:
                     logger.error(f"获取条目 {subject.name} 图片失败: {e}")
 
                 # 比对更新
                 if latest_episode.ep > subject.current_episode:
-                    logger.info(f"番剧《{subject.name}》有更新: {subject.current_episode} -> {latest_episode.ep}")
+                    logger.info(
+                        f"番剧《{subject.name}》有更新: {subject.current_episode} -> {latest_episode.ep}"
+                    )
 
                     # 更新数据库
                     # 显式转换为 str 以解决 Pylance 对 SQLAlchemy Column 对象的类型报错
-                    self.storage.update_subject_episode(str(subject.subject_id), latest_episode.ep)
+                    self.storage.update_subject_episode(
+                        str(subject.subject_id), latest_episode.ep
+                    )
 
                     # 发送通知
-                    await self._notify_subscribers(latest_episode, str(subject.subject_id), str(subject.name))
+                    await self._notify_subscribers(
+                        latest_episode, str(subject.subject_id), str(subject.name)
+                    )
 
-            except Exception as e:
+            except (BangumiApiError, DatabaseError) as e:
                 logger.error(f"更新番剧《{subject.name}》失败: {e}")
 
     async def _notify_subscribers(
@@ -208,7 +212,7 @@ class SubscriptionService:
                     type="GroupMessage", id=group_id, message_chain=chain
                 )
                 logger.info(f"向群组 {group_id} 发送《{subject_name}》更新通知成功。")
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — StarTools 可能抛出任意平台异常
                 logger.error(
                     f"向群组 {group_id} 发送《{subject_name}》更新通知失败: {e}"
                 )
