@@ -8,7 +8,6 @@
 import logging
 import os
 
-from astrbot.api.star import StarTools
 from sqlalchemy import create_engine
 from sqlalchemy.orm import joinedload, scoped_session, sessionmaker
 
@@ -22,22 +21,15 @@ class BangumiRepository:
     番剧数据访问层
     """
 
-    def __init__(self, db_path: str | None = None):
+    def __init__(self, db_path: str):
         """
         初始化数据访问层
 
         Args:
-            db_path: 数据库文件路径，如果为 None 则使用默认路径
+            db_path: 数据库文件路径
         """
-        # 使用 AstrBot 插件级数据目录规范
-        plugin_data_dir = StarTools.get_data_dir()
-
-        if not os.path.exists(plugin_data_dir):
-            os.makedirs(plugin_data_dir)
-        if db_path is None:
-            self.db_path = os.path.join(plugin_data_dir, "data.db")
-        else:
-            self.db_path = db_path
+        os.makedirs(os.path.dirname(db_path), exist_ok=True)
+        self.db_path = db_path
         self._init_db()
 
     def _init_db(self):

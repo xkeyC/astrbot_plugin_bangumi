@@ -46,9 +46,13 @@ class BangumiPlugin(Star):
         """
         插件加载时自动运行的初始化方法。
         """
+        # 0. 提前获取插件数据目录（必须先于所有依赖 StarTools 的操作）
+        plugin_data_dir = StarTools.get_data_dir()
+
         # 1. 初始化数据库
         try:
-            self.storage = BangumiRepository()
+            db_path = os.path.join(plugin_data_dir, "data.db")
+            self.storage = BangumiRepository(db_path=db_path)
         except Exception as e:
             logger.error(f"数据库初始化失败: {e}")
 
@@ -78,7 +82,7 @@ class BangumiPlugin(Star):
             self.search_service = SearchService(
                 service=self.service,
                 config_manager=self.config_manager,
-                session=self.session
+                session=self.session,
             )
 
             # 订阅服务
@@ -87,14 +91,12 @@ class BangumiPlugin(Star):
                     repository=self.storage,
                     service=self.service,
                     config_manager=self.config_manager,
-                    session=self.session
+                    session=self.session,
                 )
 
         # 5. 其他初始化流程
-        from astrbot.api.star import StarTools
         from .src.utils.env_manager import EnvManager
 
-        plugin_data_dir = StarTools.get_data_dir()
         self.env_manager = EnvManager(plugin_data_dir)
 
         # 检查本地渲染环境
