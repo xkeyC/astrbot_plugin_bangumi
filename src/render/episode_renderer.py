@@ -1,6 +1,5 @@
 from .base_renderer import BaseRenderer
-from ..services.schemas import Episode
-from ..services.contracts import RenderData
+from ..services import Episode, RenderData
 
 
 class EpisodeRenderer(BaseRenderer):

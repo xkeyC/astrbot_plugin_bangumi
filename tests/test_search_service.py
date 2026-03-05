@@ -1,7 +1,7 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 
-from src.services.search import SearchService
+from src.services import SearchService
 from astrbot.api.event import AstrMessageEvent
 
 

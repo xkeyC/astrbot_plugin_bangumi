@@ -1,27 +1,28 @@
 import aiohttp
-from typing import AsyncGenerator, cast
+from typing import TYPE_CHECKING, AsyncGenerator, cast
 
 import astrbot.api.message_components as Comp
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent
 
-from ..services import BangumiService
-from ..config.config_manager import ConfigManager
-from ..services.contracts import (
+from ..config import ConfigManager
+from ..render import CalendarRenderer, SubjectRenderer
+from .contracts import (
     MessageResult,
     RenderData,
     SearchSubjectItem,
     SubjectDetailsResponse,
 )
 from .exceptions import BangumiApiError
-from ..render.subject_renderer import SubjectRenderer
-from ..render.calendar_renderer import CalendarRenderer
+
+if TYPE_CHECKING:
+    from . import BangumiService
 
 
 class SearchService:
     def __init__(
         self,
-        service: BangumiService,
+        service: "BangumiService",
         config_manager: ConfigManager,
         session: aiohttp.ClientSession | None = None,
     ) -> None:

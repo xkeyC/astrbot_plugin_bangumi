@@ -14,7 +14,7 @@ from .contracts import (
 )
 from .schemas import Episode
 from .types import ImageSize
-from src.types import JsonObject
+from ..types import JsonObject
 
 
 class SubjectsService(BaseBangumiService):

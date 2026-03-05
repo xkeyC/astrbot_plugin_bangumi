@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from src.services.subscription import SubscriptionService
+from src.services import SubscriptionService
 
 
 @pytest.fixture

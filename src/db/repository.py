@@ -13,7 +13,7 @@ from sqlalchemy import create_engine, or_
 from sqlalchemy.orm import joinedload, scoped_session, sessionmaker
 
 from .models import Base, BangumiSubject, Subscription
-from ..services.exceptions import DatabaseError
+from ..services import DatabaseError
 
 
 class BangumiRepository:

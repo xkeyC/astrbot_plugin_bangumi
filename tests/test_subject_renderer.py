@@ -1,5 +1,5 @@
 import pytest
-from src.render.subject_renderer import SubjectRenderer
+from src.render import SubjectRenderer
 from loguru import logger
 
 

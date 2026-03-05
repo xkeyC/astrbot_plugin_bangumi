@@ -4,8 +4,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 import src.services.calendar as calendar_module
-from src.services.calendar import CalendarService
-from src.services.exceptions import BangumiApiError
+from src.services import BangumiApiError, CalendarService
 
 
 @pytest.fixture

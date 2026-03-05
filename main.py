@@ -17,15 +17,12 @@ from astrbot.core.utils.session_waiter import (
 
 # 导入配置与管理
 from astrbot.api.star import StarTools
-from .src.config.config_manager import ConfigManager
-from .src.utils.scheduler import SchedulerManager
+from .src.config import ConfigManager
+from .src.utils import EnvManager, SchedulerManager
 
 # 导入逻辑服务
-from .src.services import BangumiService
-from .src.services.search import SearchService
-from .src.services.subscription import SubscriptionService
+from .src.services import BangumiService, SearchService, SubscriptionService
 from .src.db import BangumiRepository
-from .src.utils.env_manager import EnvManager
 
 
 @register(

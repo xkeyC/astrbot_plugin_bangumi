@@ -1,24 +1,26 @@
 import aiohttp
-from typing import cast
+from typing import TYPE_CHECKING, cast
 from astrbot.api import logger
 from astrbot.api.star import StarTools
 from astrbot.core.message.message_event_result import MessageChain
 
-from ..db.repository import BangumiRepository
-from . import BangumiService
+from ..config import ConfigManager
+from ..db import BangumiRepository
+from ..render import EpisodeRenderer
 from .contracts import SubscribeCandidate, SubscribeMatch, UnsubscribeMatch
 from .exceptions import BangumiApiError, DatabaseError, SubscriptionError
 from .schemas import Episode
 from .types import ImageSize
-from ..config.config_manager import ConfigManager
-from ..render.episode_renderer import EpisodeRenderer
+
+if TYPE_CHECKING:
+    from . import BangumiService
 
 
 class SubscriptionService:
     def __init__(
         self,
         repository: BangumiRepository,
-        service: BangumiService,
+        service: "BangumiService",
         config_manager: ConfigManager,
         session: aiohttp.ClientSession | None = None,
     ) -> None:

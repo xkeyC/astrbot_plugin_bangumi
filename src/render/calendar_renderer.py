@@ -3,7 +3,7 @@ from typing import cast
 
 from astrbot.api import logger
 from .base_renderer import BaseRenderer
-from ..services.contracts import CalendarDay, CalendarWeekday, RenderData
+from ..services import CalendarDay, CalendarWeekday, RenderData
 
 
 def reorder_days(calendar_data: list[CalendarDay]) -> list[CalendarDay]:

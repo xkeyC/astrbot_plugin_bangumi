@@ -1,6 +1,6 @@
 from typing import TypeAlias, TypedDict
 
-from src.types import JsonValue
+from ..types import JsonValue
 
 
 class SearchSubjectItem(TypedDict, total=False):

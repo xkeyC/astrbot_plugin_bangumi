@@ -10,7 +10,7 @@ from astrbot.api import logger
 
 from .exceptions import BangumiApiError, BangumiRateLimitError, NoSubjectFound
 from .contracts import SearchSubjectsResponse
-from src.types import JsonArray, JsonObject
+from ..types import JsonArray, JsonObject
 
 
 class BaseBangumiService:

@@ -1,6 +1,6 @@
 from typing import cast
 
-from src.types import JsonObject
+from ..types import JsonObject
 
 from .base import BaseBangumiService
 from .contracts import PersonDetailsResponse, PersonsSearchResponse
