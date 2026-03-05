@@ -2,8 +2,9 @@ import pytest
 from src.render.subject_renderer import SubjectRenderer
 from loguru import logger
 
+
 @pytest.mark.asyncio
-async def test_render_subject_card_success():
+async def test_render_subject_card_success() -> None:
     # 准备测试数据
     subject_data = {
         "date": "2026-01-11",
