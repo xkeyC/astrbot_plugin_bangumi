@@ -1,6 +1,6 @@
 import os
-import datetime
 import aiohttp
+from collections.abc import AsyncGenerator
 
 from astrbot.api import logger
 from astrbot.api.all import AstrBotConfig
@@ -8,15 +8,16 @@ from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, register
 
 # 导入配置与管理
+from astrbot.api.star import StarTools
 from .src.config.config_manager import ConfigManager
 from .src.utils.scheduler import SchedulerManager
-from astrbot.api.star import StarTools
 
 # 导入逻辑服务
 from .src.services import BangumiService
-from .src.services.subscription import SubscriptionService
 from .src.services.search import SearchService
+from .src.services.subscription import SubscriptionService
 from .src.db import BangumiRepository
+from .src.utils.env_manager import EnvManager
 
 
 @register(
@@ -36,11 +37,12 @@ class BangumiPlugin(Star):
         self.config_manager = ConfigManager(config)
         self.scheduler_manager = SchedulerManager()
 
-        self.session = None
-        self.storage = None
-        self.service = None
-        self.subscription_service = None
-        self.search_service = None
+        self.session: aiohttp.ClientSession | None = None
+        self.storage: BangumiRepository | None = None
+        self.service: BangumiService | None = None
+        self.subscription_service: SubscriptionService | None = None
+        self.search_service: SearchService | None = None
+        self.env_manager: EnvManager | None = None
 
     async def initialize(self) -> None:
         """
@@ -53,7 +55,7 @@ class BangumiPlugin(Star):
         try:
             db_path = os.path.join(plugin_data_dir, "data.db")
             self.storage = BangumiRepository(db_path=db_path)
-        except Exception as e:
+        except (OSError, RuntimeError, ValueError, TypeError) as e:
             logger.error(f"数据库初始化失败: {e}")
 
         # 2. 初始化网络会话 (Shared Session)
@@ -73,7 +75,7 @@ class BangumiPlugin(Star):
                 proxy=proxy_url,
                 session=self.session,
             )
-        except Exception as e:
+        except (RuntimeError, ValueError, TypeError) as e:
             logger.error(f"服务初始化失败: {e}")
 
         # 4. 初始化业务逻辑服务 (Dependency Injection)
@@ -95,8 +97,6 @@ class BangumiPlugin(Star):
                 )
 
         # 5. 其他初始化流程
-        from .src.utils.env_manager import EnvManager
-
         self.env_manager = EnvManager(plugin_data_dir)
 
         # 检查本地渲染环境
@@ -114,7 +114,7 @@ class BangumiPlugin(Star):
                     minute=0,
                 )
                 logger.info("Bangumi 插件定时更新任务已启动")
-            except Exception as e:
+            except (RuntimeError, ValueError, TypeError) as e:
                 logger.error(f"添加定时任务失败: {e}")
 
         logger.info("Bangumi 插件初始化流程结束")
@@ -122,7 +122,9 @@ class BangumiPlugin(Star):
     # --- 命令处理区 ---
 
     @filter.command("bgm")
-    async def search(self, event: AstrMessageEvent, query: str, top_k: int = 1):
+    async def search(
+        self, event: AstrMessageEvent, query: str, top_k: int = 1
+    ) -> AsyncGenerator[object, None]:
         if not self.search_service:
             yield event.plain_result("❌ 搜索服务未就绪")
             return
@@ -132,7 +134,9 @@ class BangumiPlugin(Star):
             yield result
 
     @filter.command("bgm番剧")
-    async def search_anime(self, event: AstrMessageEvent, query: str, top_k: int = 1):
+    async def search_anime(
+        self, event: AstrMessageEvent, query: str, top_k: int = 1
+    ) -> AsyncGenerator[object, None]:
         if not self.search_service:
             yield event.plain_result("❌ 搜索服务未就绪")
             return
@@ -142,7 +146,9 @@ class BangumiPlugin(Star):
             yield result
 
     @filter.command("bgm剧场版")
-    async def search_movie(self, event: AstrMessageEvent, query: str, top_k: int = 1):
+    async def search_movie(
+        self, event: AstrMessageEvent, query: str, top_k: int = 1
+    ) -> AsyncGenerator[object, None]:
         if not self.search_service:
             yield event.plain_result("❌ 搜索服务未就绪")
             return
@@ -152,7 +158,9 @@ class BangumiPlugin(Star):
             yield result
 
     @filter.command("bgm漫画")
-    async def search_manga(self, event: AstrMessageEvent, query: str, top_k: int = 1):
+    async def search_manga(
+        self, event: AstrMessageEvent, query: str, top_k: int = 1
+    ) -> AsyncGenerator[object, None]:
         if not self.search_service:
             yield event.plain_result("❌ 搜索服务未就绪")
             return
@@ -162,7 +170,7 @@ class BangumiPlugin(Star):
             yield result
 
     @filter.command("today")
-    async def calendar(self, event: AstrMessageEvent):
+    async def calendar(self, event: AstrMessageEvent) -> AsyncGenerator[object, None]:
         if not self.search_service:
             yield event.plain_result("❌ 搜索服务未就绪")
             return
@@ -170,12 +178,14 @@ class BangumiPlugin(Star):
             yield result
 
     @filter.command("追番")
-    async def subscribe(self, event: AstrMessageEvent, query: str):
+    async def subscribe(
+        self, event: AstrMessageEvent, query: str
+    ) -> AsyncGenerator[object, None]:
         if not self.subscription_service:
             yield event.plain_result("❌ 订阅服务未就绪")
             return
 
-        group_id = getattr(event, "session_id", None)
+        group_id: str | None = getattr(event, "session_id", None)
         if hasattr(event, "message_obj") and hasattr(event.message_obj, "group_id"):
             group_id = event.message_obj.group_id
 
@@ -187,12 +197,14 @@ class BangumiPlugin(Star):
         yield event.plain_result(result)
 
     @filter.command("弃坑")
-    async def unsubscribe(self, event: AstrMessageEvent, query: str):
+    async def unsubscribe(
+        self, event: AstrMessageEvent, query: str
+    ) -> AsyncGenerator[object, None]:
         if not self.subscription_service:
             yield event.plain_result("❌ 订阅服务未就绪")
             return
 
-        group_id = getattr(event, "session_id", None)
+        group_id: str | None = getattr(event, "session_id", None)
         if hasattr(event, "message_obj") and hasattr(event.message_obj, "group_id"):
             group_id = event.message_obj.group_id
 
@@ -203,7 +215,7 @@ class BangumiPlugin(Star):
         result = await self.subscription_service.unsubscribe(group_id, query)
         yield event.plain_result(result)
 
-    async def terminate(self):
+    async def terminate(self) -> None:
         logger.info("正在清理 Bangumi 插件资源...")
         if self.scheduler_manager.scheduler.running:
             self.scheduler_manager.scheduler.shutdown(wait=False)

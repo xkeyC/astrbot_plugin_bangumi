@@ -1,11 +1,12 @@
 import aiohttp
-from typing import Optional, Tuple, Dict, Any
+from typing import cast
 from astrbot.api import logger
 from astrbot.api.star import StarTools
 from astrbot.core.message.message_event_result import MessageChain
 
 from ..db.repository import BangumiRepository
 from . import BangumiService
+from .contracts import SubscribeMatch, UnsubscribeMatch
 from .exceptions import BangumiApiError, DatabaseError, SubscriptionError
 from .schemas import Episode
 from .types import ImageSize
@@ -19,7 +20,7 @@ class SubscriptionService:
         repository: BangumiRepository,
         service: BangumiService,
         config_manager: ConfigManager,
-        session: Optional[aiohttp.ClientSession] = None,
+        session: aiohttp.ClientSession | None = None,
     ) -> None:
         self.storage = repository
         self.service = service
@@ -28,7 +29,7 @@ class SubscriptionService:
 
     async def _match_subscribable_subject(
         self, keyword: str
-    ) -> Tuple[Optional[str], Optional[Dict[str, Any]]]:
+    ) -> tuple[str | None, SubscribeMatch | None]:
         """
         查找可订阅的番剧逻辑（从 API 层迁移至此）。
         """
@@ -47,7 +48,8 @@ class SubscriptionService:
         if not details:
             return "❌ 获取番剧详情失败", None
 
-        name = details.get("name_cn") or details.get("name")
+        raw_name = details.get("name_cn") or details.get("name")
+        name = str(raw_name) if raw_name else "未知番剧"
 
         # 3. 检查放送列表
         calendar_res = await self.service.get_calendar()
@@ -68,13 +70,18 @@ class SubscriptionService:
             )
 
         # 构造返回数据
-        result_data = {
+        total_episodes_raw = details.get("eps", 0)
+        total_episodes = (
+            int(total_episodes_raw) if isinstance(total_episodes_raw, (int, str)) else 0
+        )
+        air_date = str(details.get("date", ""))
+        result_data: SubscribeMatch = {
             "subject_id": subject_id,
             "name": name,
-            "air_date": details.get("date", ""),
-            "total_episodes": details.get("eps", 0),
+            "air_date": air_date,
+            "total_episodes": total_episodes,
         }
-        return None, result_data
+        return None, cast(SubscribeMatch, result_data)
 
     async def subscribe(self, group_id: str, query: str) -> str:
         """
@@ -114,7 +121,7 @@ class SubscriptionService:
         """
         logger.info(f"处理取消追番请求: {query}, group_id={group_id}")
         try:
-            error_msg, subject_info = await self._match_subscribable_subject(query)
+            error_msg, subject_info = self._match_local_subscription(group_id, query)
             if error_msg:
                 return error_msg
             if not subject_info:
@@ -132,7 +139,39 @@ class SubscriptionService:
             logger.error(f"SubscriptionService.unsubscribe 失败: {e}")
             return f"❌ 处理失败: {e}"
 
-    async def check_updates(self):
+    def _match_local_subscription(
+        self, group_id: str, query: str
+    ) -> tuple[str | None, UnsubscribeMatch | None]:
+        """
+        在当前群组的本地订阅中做模糊匹配。
+        """
+        normalized_query = str(query).strip()
+        if not normalized_query:
+            return "❌ 请提供要取消订阅的番剧关键词或ID。", None
+
+        # 取 6 条用于判断是否超过默认展示上限（5 条）
+        candidates = self.storage.find_group_subscription_candidates(
+            group_id=group_id, keyword=normalized_query, limit=6
+        )
+        if not candidates:
+            return f"❌ 未找到与「{normalized_query}」匹配的本群订阅番剧。", None
+
+        if len(candidates) == 1:
+            subject = candidates[0]
+            return None, {"subject_id": str(subject.subject_id), "name": str(subject.name)}
+
+        display_limit = 5
+        display_candidates = candidates[:display_limit]
+        lines = [
+            f"⚠️ 匹配到多个已订阅番剧，请提供更精确名称或直接使用 ID：",
+        ]
+        for idx, subject in enumerate(display_candidates, start=1):
+            lines.append(f"{idx}. {subject.name} (ID: {subject.subject_id})")
+        if len(candidates) > display_limit:
+            lines.append("（仅显示前 5 项）")
+        return "\n".join(lines), None
+
+    async def check_updates(self) -> None:
         """
         定时任务核心逻辑：检查所有监控中的番剧是否有更新。
         """
