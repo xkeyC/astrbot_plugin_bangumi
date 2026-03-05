@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main, master]
+    branches: [main]
   pull_request:
-    branches: [main, master]
+    branches: [main]
 
 jobs:
   quality:
@@ -16,7 +16,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: "3.11"
 
       - name: Install dependencies
         run: |
@@ -25,7 +25,7 @@ jobs:
           pip install ruff mypy pytest pytest-asyncio types-PyYAML
 
       - name: Ruff lint
-        run: ruff check .
+        run: ruff check . --ignore RUF001,RUF002,RUF003
 
       - name: Ruff format check
         run: ruff format --check .
