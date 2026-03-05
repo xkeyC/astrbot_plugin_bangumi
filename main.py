@@ -213,7 +213,7 @@ class BangumiPlugin(Star):
             return
 
         error_msg, candidates = await self.subscription_service.get_subscribe_candidates(
-            query=query,
+            keyword=query,
             limit=self.config_manager.get_max_fuzzy_results(),
         )
         if error_msg:
