@@ -218,7 +218,10 @@ class BangumiPlugin(Star):
             yield event.plain_result("❌ 无法获取群组ID")
             return
 
-        error_msg, candidates = await self.subscription_service.get_subscribe_candidates(
+        (
+            error_msg,
+            candidates,
+        ) = await self.subscription_service.get_subscribe_candidates(
             keyword=query,
             limit=self.config_manager.get_max_fuzzy_results(),
         )

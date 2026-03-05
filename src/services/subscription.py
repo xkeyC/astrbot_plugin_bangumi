@@ -117,7 +117,9 @@ class SubscriptionService:
         """
         查找可订阅的番剧逻辑（从 API 层迁移至此）。
         """
-        error_msg, candidates = await self.get_subscribe_candidates(keyword=keyword, limit=1)
+        error_msg, candidates = await self.get_subscribe_candidates(
+            keyword=keyword, limit=1
+        )
         if error_msg:
             return error_msg, None
         if not candidates:
@@ -143,7 +145,9 @@ class SubscriptionService:
                 total_episodes=subject_info["total_episodes"],
             )
             if success:
-                return f"✅ 成功订阅《{subject_info['name']}》！\n如有更新将推送到本群。"
+                return (
+                    f"✅ 成功订阅《{subject_info['name']}》！\n如有更新将推送到本群。"
+                )
             return "❌ 订阅失败，数据库错误。"
         except (BangumiApiError, DatabaseError, SubscriptionError) as e:
             logger.error(f"SubscriptionService.subscribe_by_subject_id 失败: {e}")
