@@ -153,11 +153,10 @@ class BaseRenderer:
                     return await self._handle_rpc_response(response)
             else:
                 # 兜底：如果没有外部 Session，则创建临时 Session
-                async with aiohttp.ClientSession() as session:
-                    async with session.post(
-                        rpc_url, json=payload, timeout=client_timeout
-                    ) as response:
-                        return await self._handle_rpc_response(response)
+                async with aiohttp.ClientSession() as session, session.post(
+                    rpc_url, json=payload, timeout=client_timeout
+                ) as response:
+                    return await self._handle_rpc_response(response)
 
         except aiohttp.ClientConnectorError as e:
             logger.error(f"[-] RPC 渲染服务器连接失败: {e}")
