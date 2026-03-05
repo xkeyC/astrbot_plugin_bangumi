@@ -6,7 +6,7 @@ from typing import Literal, cast, overload
 import aiohttp
 from astrbot.api import logger
 
-from ..types import JsonArray, JsonObject
+from ..bangumi_types import JsonArray, JsonObject
 from .contracts import SearchSubjectsResponse
 from .exceptions import BangumiApiError, BangumiRateLimitError, NoSubjectFound
 

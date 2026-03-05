@@ -1,6 +1,6 @@
 from typing import TypeAlias, TypedDict
 
-from ..types import JsonValue
+from ..bangumi_types import JsonValue
 
 
 class SearchSubjectItem(TypedDict, total=False):
