@@ -29,7 +29,7 @@ from .src.db import BangumiRepository
     "astrbot_plugin_bangumi_enhance",
     "united_pooh",
     "AstrBot Bangumi 增强版：为 AstrBot 打造的一站式 Bangumi 追番助手。支持番剧/漫画图文搜索、每日放送时刻表查看及集数更新自动提醒。",
-    "v1.1.0",
+    "v1.1.1",
     "https://github.com/united-pooh/astrbot_plugin_bangumi",
 )
 class BangumiPlugin(Star):
