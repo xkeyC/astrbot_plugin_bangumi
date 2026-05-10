@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.2.0
+
+### 新增功能
+- **LLM 工具能力**: 新增 `search_bangumi_subject`、`get_bangumi_subject`、`get_bangumi_calendar` tools，让启用 function calling 的 LLM 可主动检索 Bangumi 候选、条目详情和每日放送表。
+
+### 元信息
+- **Fork 信息更新**: 更新插件作者、版本和仓库地址，指向 `https://github.com/xkeyC/astrbot_plugin_bangumi`。
+
 ## v1.1.1
 
 ### 功能拓展

@@ -1,7 +1,7 @@
 <div align="center">
 
 # Bangumi 搜索插件使用指南
-[![repo](https://img.shields.io/badge/repo-v1.1.1-blue.svg)](https://github.com/united-pooh/astrbot_plugin_bangumi)
+[![repo](https://img.shields.io/badge/repo-v1.2.0-blue.svg)](https://github.com/xkeyC/astrbot_plugin_bangumi)
 [![License](https://img.shields.io/badge/license-Apache%202.0-green.svg)](LICENSE-2.0)
 [![AstrBot](https://img.shields.io/badge/AstrBot-%3E%3D4.0.0-orange.svg)](https://github.com/Soulter/AstrBot)
 [![Python](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://www.python.org/)
@@ -37,10 +37,21 @@
 | `/追番` | 订阅番剧，更新时自动通知 | `<关键词\|ID>` | `/追番 进击的巨人` |
 | `/弃坑` | 取消订阅番剧 | `<关键词\|ID>` | `/弃坑 进击的巨人` |
 
+### 3. LLM 工具能力
+
+插件会向 AstrBot 注册以下 tools，允许启用 function calling 的 LLM 在对话中主动检索 Bangumi 信息并组织回答：
+
+| Tool | 功能 | 典型用途 |
+|:-----|:-----|:---------|
+| `search_bangumi_subject` | 按关键词搜索 Bangumi 条目候选 | 当用户只提供番名、别名或漫画名时，先获取条目 ID 与候选列表 |
+| `get_bangumi_subject` | 获取指定条目详情 | 回答简介、评分、排名、标签、制作信息、总集数和最新已播剧集 |
+| `get_bangumi_calendar` | 获取每日放送时刻表 | 回答“今天有什么番更新”“本周放送表”等问题 |
+
 **功能亮点**：
 - **精美卡片**：自动生成包含封面、评分、排名、简介及剧集进度的图文卡片。
 - **每日放送**：渲染精美的每日放送时刻表。
 - **自动追番**：订阅后自动监控集数更新并实时推送通知。
+- **LLM 感知**：为大模型提供 Bangumi 搜索、条目详情和每日放送 tools，支持自然语言问番。
 
 ## 🛠️ 配置参数
 
