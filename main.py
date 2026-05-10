@@ -24,6 +24,8 @@ from .src.db import BangumiRepository
 
 # 导入逻辑服务
 from .src.services import (
+    BangumiApiError,
+    BangumiRateLimitError,
     BangumiService,
     NoSubjectFound,
     SearchService,
@@ -211,6 +213,14 @@ class BangumiPlugin(Star):
         async for result in self.search_service.handle_calendar(event):
             yield result
 
+    LLM_TOOL_SERVICE_ERRORS = (
+        BangumiApiError,
+        BangumiRateLimitError,
+        RuntimeError,
+        ValueError,
+        TypeError,
+    )
+
     @filter.llm_tool(name="search_bangumi_subject")
     async def search_bangumi_subject(
         self, event: AstrMessageEvent, keyword: str, limit: int = 3
@@ -231,7 +241,9 @@ class BangumiPlugin(Star):
                 keyword=keyword,
                 limit=safe_limit,
             )
-        except (RuntimeError, ValueError, TypeError) as e:
+        except NoSubjectFound:
+            return f"🔍 未找到与“{keyword}”相关的 Bangumi 条目。"
+        except self.LLM_TOOL_SERVICE_ERRORS as e:
             logger.error(f"LLM 搜索 Bangumi 条目失败: {e}")
             return f"❌ 搜索失败: {e}"
 
@@ -268,7 +280,7 @@ class BangumiPlugin(Star):
             subject = await self.service.get_subject_details(subject_id)
         except NoSubjectFound:
             return f"🔍 未找到 ID 为 {subject_id} 的 Bangumi 条目。"
-        except (RuntimeError, ValueError, TypeError) as e:
+        except self.LLM_TOOL_SERVICE_ERRORS as e:
             logger.error(f"LLM 获取 Bangumi 条目失败: {e}")
             return f"❌ 获取条目失败: {e}"
 
@@ -281,7 +293,7 @@ class BangumiPlugin(Star):
         except NoSubjectFound:
             episodes_data = {"data": []}
             latest_episode = None
-        except (RuntimeError, ValueError, TypeError) as e:
+        except self.LLM_TOOL_SERVICE_ERRORS as e:
             logger.warning(
                 f"LLM 获取 Bangumi 剧集信息失败 (subject_id={subject_id}): {e}"
             )
@@ -339,7 +351,7 @@ class BangumiPlugin(Star):
 
         try:
             calendar_res = await self.service.get_calendar()
-        except (RuntimeError, ValueError, TypeError) as e:
+        except self.LLM_TOOL_SERVICE_ERRORS as e:
             logger.error(f"LLM 获取 Bangumi 放送表失败: {e}")
             return f"❌ 获取放送表失败: {e}"
 
