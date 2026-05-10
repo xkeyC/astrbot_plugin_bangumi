@@ -1,4 +1,5 @@
 import copy
+import datetime
 import os
 import re
 from collections.abc import AsyncGenerator
@@ -22,7 +23,12 @@ from .src.config import ConfigManager
 from .src.db import BangumiRepository
 
 # 导入逻辑服务
-from .src.services import BangumiService, SearchService, SubscriptionService
+from .src.services import (
+    BangumiService,
+    NoSubjectFound,
+    SearchService,
+    SubscriptionService,
+)
 from .src.utils import EnvManager, SchedulerManager
 
 
@@ -260,13 +266,27 @@ class BangumiPlugin(Star):
 
         try:
             subject = await self.service.get_subject_details(subject_id)
-            episodes_data = await self.service.get_subject_episodes(int(subject_id))
+        except NoSubjectFound:
+            return f"🔍 未找到 ID 为 {subject_id} 的 Bangumi 条目。"
         except (RuntimeError, ValueError, TypeError) as e:
             logger.error(f"LLM 获取 Bangumi 条目失败: {e}")
             return f"❌ 获取条目失败: {e}"
 
         if not subject:
             return f"🔍 未找到 ID 为 {subject_id} 的 Bangumi 条目。"
+
+        try:
+            episodes_data = await self.service.get_subject_episodes(int(subject_id))
+            latest_episode = await self.service.get_latest_episode(int(subject_id))
+        except NoSubjectFound:
+            episodes_data = {"data": []}
+            latest_episode = None
+        except (RuntimeError, ValueError, TypeError) as e:
+            logger.warning(
+                f"LLM 获取 Bangumi 剧集信息失败 (subject_id={subject_id}): {e}"
+            )
+            episodes_data = {"data": []}
+            latest_episode = None
 
         title = self._format_subject_title(subject)
         rating = subject.get("rating", {})
@@ -276,7 +296,6 @@ class BangumiPlugin(Star):
         tags = self._format_subject_tags(subject)
         infobox = self._format_subject_infobox(subject)
         episodes = episodes_data.get("data", [])
-        latest_episode = await self.service.get_latest_episode(int(subject_id))
 
         lines = [
             f"Bangumi 条目：{title}",
@@ -328,13 +347,15 @@ class BangumiPlugin(Star):
             return "❌ 未获取到 Bangumi 放送数据。"
 
         safe_max_items = max(1, min(int(max_items), 20))
+        today_id = datetime.datetime.now().isoweekday()
         lines = ["Bangumi 每日放送时刻表："]
-        for day in calendar_res:
+        for day in self._order_calendar_days_from_today(calendar_res, today_id):
             weekday = day.get("weekday", {})
             day_name = (
                 weekday.get("cn") or weekday.get("ja") or weekday.get("en") or "未知"
             )
-            today_mark = "（今天）" if day.get("is_today") else ""
+            is_today = weekday.get("id") == today_id
+            today_mark = "（今天）" if is_today else ""
             items = day.get("items", [])
             item_titles = [
                 self._format_subject_title(item) for item in items[:safe_max_items]
@@ -344,6 +365,16 @@ class BangumiPlugin(Star):
                 f"{day_name}{today_mark}: {', '.join(item_titles) if item_titles else '暂无'}{more}"
             )
         return "\n".join(lines)
+
+    @staticmethod
+    def _order_calendar_days_from_today(
+        calendar_res: list[JsonObject], today_id: int
+    ) -> list[JsonObject]:
+        for index, day in enumerate(calendar_res):
+            weekday = day.get("weekday", {})
+            if isinstance(weekday, dict) and weekday.get("id") == today_id:
+                return calendar_res[index:] + calendar_res[:index]
+        return calendar_res
 
     @staticmethod
     def _format_subject_title(subject: JsonObject) -> str:
